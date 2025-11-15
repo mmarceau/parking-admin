@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowLeft, Plus, Edit2, Trash2, DollarSign } from "lucide-react";
 
 export default function ProductManagementPage({
@@ -254,8 +255,11 @@ export default function ProductManagementPage({
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-semibold">{product.name}</h4>
-                            <Badge variant={product.isActive ? "default" : "secondary"} className="text-xs">
+                            <h4 className={`font-semibold ${!product.isActive ? "line-through text-gray-400" : ""}`}>{product.name}</h4>
+                            <Badge hidden={product.isActive}
+                              variant={product.isActive ? "default" : "secondary"} 
+                              className={`text-xs ${product.isActive ? "default" : ""}`}
+                            >
                               {product.isActive ? "Active" : "Inactive"}
                             </Badge>
                           </div>
@@ -296,81 +300,6 @@ export default function ProductManagementPage({
               </CardContent>
             </Card>
 
-            {/* Product Form */}
-            {(isAddingProduct || isEditingProduct) && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>{isEditingProduct ? "Edit Product" : "Add New Product"}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="name">Product Name *</Label>
-                    <Input
-                      id="name"
-                      value={productForm.name}
-                      onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                      placeholder="e.g., Monthly Unlimited Pass"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="type">Type *</Label>
-                    <Input
-                      id="type"
-                      value={productForm.type}
-                      onChange={(e) => setProductForm({ ...productForm, type: e.target.value })}
-                      placeholder="e.g., monthly, daily, annual"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="grid gap-2">
-                      <Label htmlFor="seats">Available Seats *</Label>
-                      <Input
-                        id="seats"
-                        type="number"
-                        min="1"
-                        value={productForm.availableSeats}
-                        onChange={(e) =>
-                          setProductForm({ ...productForm, availableSeats: parseInt(e.target.value) || 1 })
-                        }
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="status">Status *</Label>
-                      <select
-                        id="status"
-                        value={productForm.isActive ? "true" : "false"}
-                        onChange={(e) => setProductForm({ ...productForm, isActive: e.target.value === "true" })}
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      >
-                        <option value="true">Active</option>
-                        <option value="false">Inactive</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="stripeProductId">Stripe Product ID (Optional)</Label>
-                    <Input
-                      id="stripeProductId"
-                      value={productForm.stripeProductId}
-                      onChange={(e) => setProductForm({ ...productForm, stripeProductId: e.target.value })}
-                      placeholder="prod_..."
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button onClick={handleSaveProduct} disabled={!productForm.name || !productForm.type}>
-                      {isEditingProduct ? "Update Product" : "Create Product"}
-                    </Button>
-                    <Button variant="outline" onClick={handleCancelProductEdit}>
-                      Cancel
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           {/* Right Column: Prices */}
@@ -399,11 +328,17 @@ export default function ProductManagementPage({
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-2">
-                                <h4 className="font-semibold">{price.name}</h4>
-                                <Badge variant={price.isActive ? "default" : "secondary"} className="text-xs">
+                                <h4 className={`font-semibold ${!price.isActive ? "line-through text-gray-400" : ""}`}>{price.name}</h4>
+                                <Badge hidden={price.isActive}
+                                  variant={price.isActive ? "default" : "secondary"} 
+                                  className={`text-xs ${price.isActive ? "default" : ""}`}
+                                >
                                   {price.isActive ? "Active" : "Inactive"}
                                 </Badge>
-                                <Badge variant={price.isPublic ? "default" : "outline"} className="text-xs">
+                                <Badge 
+                                  variant={price.isPublic ? "default" : "outline"} 
+                                  className={`text-xs ${price.isPublic ? "bg-green-500 hover:bg-green-600 border-transparent text-white" : ""}`}
+                                >
                                   {price.isPublic ? "Public" : "Private"}
                                 </Badge>
                               </div>
@@ -430,87 +365,6 @@ export default function ProductManagementPage({
                   </CardContent>
                 </Card>
 
-                {/* Price Form */}
-                {(isAddingPrice || isEditingPrice) && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>{isEditingPrice ? "Edit Price" : "Add New Price"}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="priceName">Price Name *</Label>
-                        <Input
-                          id="priceName"
-                          value={priceForm.name}
-                          onChange={(e) => setPriceForm({ ...priceForm, name: e.target.value })}
-                          placeholder="e.g., Monthly, Annual, Weekend"
-                        />
-                      </div>
-
-                      <div className="grid gap-2">
-                        <Label htmlFor="amount">Amount (in cents) *</Label>
-                        <Input
-                          id="amount"
-                          type="number"
-                          min="0"
-                          value={priceForm.amount}
-                          onChange={(e) => setPriceForm({ ...priceForm, amount: parseInt(e.target.value) || 0 })}
-                          placeholder="e.g., 5000 for $50.00"
-                        />
-                        <p className="text-xs text-gray-500">Preview: ${(priceForm.amount / 100).toFixed(2)}</p>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                          <Label htmlFor="priceStatus">Status *</Label>
-                          <select
-                            id="priceStatus"
-                            value={priceForm.isActive ? "true" : "false"}
-                            onChange={(e) => setPriceForm({ ...priceForm, isActive: e.target.value === "true" })}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                          >
-                            <option value="true">Active</option>
-                            <option value="false">Inactive</option>
-                          </select>
-                        </div>
-                        <div className="grid gap-2">
-                          <Label htmlFor="visibility">Visibility *</Label>
-                          <select
-                            id="visibility"
-                            value={priceForm.isPublic ? "true" : "false"}
-                            onChange={(e) => setPriceForm({ ...priceForm, isPublic: e.target.value === "true" })}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                          >
-                            <option value="true">Public</option>
-                            <option value="false">Private</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-2">
-                        <Label htmlFor="stripePriceId">Stripe Price ID (Optional)</Label>
-                        <Input
-                          id="stripePriceId"
-                          value={priceForm.stripePriceId}
-                          onChange={(e) => setPriceForm({ ...priceForm, stripePriceId: e.target.value })}
-                          placeholder="price_..."
-                        />
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={handleSavePrice}
-                          disabled={!priceForm.name || priceForm.amount <= 0}
-                        >
-                          {isEditingPrice ? "Update Price" : "Create Price"}
-                        </Button>
-                        <Button variant="outline" onClick={handleCancelPriceEdit}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
               </>
             ) : (
               <Card>
@@ -522,6 +376,164 @@ export default function ProductManagementPage({
           </div>
         </div>
       </div>
+
+      {/* Product Modal */}
+      <Dialog open={isAddingProduct || isEditingProduct} onOpenChange={(open) => !open && handleCancelProductEdit()}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{isEditingProduct ? "Edit Product" : "Add New Product"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">Product Name *</Label>
+              <Input
+                id="name"
+                value={productForm.name}
+                onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+                placeholder="e.g., Monthly Unlimited Pass"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="type">Type *</Label>
+              <Input
+                id="type"
+                value={productForm.type}
+                onChange={(e) => setProductForm({ ...productForm, type: e.target.value })}
+                placeholder="e.g., monthly, daily, annual"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="seats">Available Seats *</Label>
+                <Input
+                  id="seats"
+                  type="number"
+                  min="1"
+                  value={productForm.availableSeats}
+                  onChange={(e) =>
+                    setProductForm({ ...productForm, availableSeats: parseInt(e.target.value) || 1 })
+                  }
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="status">Status *</Label>
+                <select
+                  id="status"
+                  value={productForm.isActive ? "true" : "false"}
+                  onChange={(e) => setProductForm({ ...productForm, isActive: e.target.value === "true" })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="stripeProductId">Stripe Product ID (Optional)</Label>
+              <Input
+                id="stripeProductId"
+                value={productForm.stripeProductId}
+                onChange={(e) => setProductForm({ ...productForm, stripeProductId: e.target.value })}
+                placeholder="prod_..."
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={handleCancelProductEdit}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveProduct} disabled={!productForm.name || !productForm.type}>
+                {isEditingProduct ? "Update Product" : "Create Product"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Price Modal */}
+      <Dialog open={isAddingPrice || isEditingPrice} onOpenChange={(open) => !open && handleCancelPriceEdit()}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{isEditingPrice ? "Edit Price" : "Add New Price"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="priceName">Price Name *</Label>
+              <Input
+                id="priceName"
+                value={priceForm.name}
+                onChange={(e) => setPriceForm({ ...priceForm, name: e.target.value })}
+                placeholder="e.g., Monthly, Annual, Weekend"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="amount">Amount (in cents) *</Label>
+              <Input
+                id="amount"
+                type="number"
+                min="0"
+                value={priceForm.amount}
+                onChange={(e) => setPriceForm({ ...priceForm, amount: parseInt(e.target.value) || 0 })}
+                placeholder="e.g., 5000 for $50.00"
+              />
+              <p className="text-xs text-gray-500">Preview: ${(priceForm.amount / 100).toFixed(2)}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="priceStatus">Status *</Label>
+                <select
+                  id="priceStatus"
+                  value={priceForm.isActive ? "true" : "false"}
+                  onChange={(e) => setPriceForm({ ...priceForm, isActive: e.target.value === "true" })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="visibility">Visibility *</Label>
+                <select
+                  id="visibility"
+                  value={priceForm.isPublic ? "true" : "false"}
+                  onChange={(e) => setPriceForm({ ...priceForm, isPublic: e.target.value === "true" })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="true">Public</option>
+                  <option value="false">Private</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="stripePriceId">Stripe Price ID (Optional)</Label>
+              <Input
+                id="stripePriceId"
+                value={priceForm.stripePriceId}
+                onChange={(e) => setPriceForm({ ...priceForm, stripePriceId: e.target.value })}
+                placeholder="price_..."
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={handleCancelPriceEdit}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSavePrice}
+                disabled={!priceForm.name || priceForm.amount <= 0}
+              >
+                {isEditingPrice ? "Update Price" : "Create Price"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
