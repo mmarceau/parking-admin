@@ -1,74 +1,51 @@
-import { useEffect, useState } from "react";
-import { faker } from "@faker-js/faker";
+import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
+import AdminPage from "./AdminPage";
+import UserPage from "./UserPage";
+import { Button } from "./components/ui/button";
 
-// For demo purposes. In a real app, you'd have real user data.
-const NAME = getOrSetFakeName();
-
-export default function App() {
-  const messages = [
-    { _id: "1", user: "Alice", body: "Good morning!" },
-    { _id: "2", user: NAME, body: "Beautiful sunrise today" },
-  ];
-  // TODO: Add mutation hook here.
-
-  const [newMessageText, setNewMessageText] = useState("");
-
-  useEffect(() => {
-    // Make sure scrollTo works on button click in Chrome
-    setTimeout(() => {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-    }, 0);
-  }, [messages]);
-
+function Navigation() {
+  const location = useLocation();
+  
   return (
-    <main className="chat">
-      <header>
-        <h1>Convex Chat</h1>
-        <p>
-          Connected as <strong>{NAME}</strong>
-        </p>
-      </header>
-      {messages?.map((message) => (
-        <article
-          key={message._id}
-          className={message.user === NAME ? "message-mine" : ""}
-        >
-          <div>{message.user}</div>
-
-          <p>{message.body}</p>
-        </article>
-      ))}
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          alert("Mutation not implemented yet");
-          setNewMessageText("");
-        }}
-      >
-        <input
-          value={newMessageText}
-          onChange={async (e) => {
-            const text = e.target.value;
-            setNewMessageText(text);
-          }}
-          placeholder="Write a message…"
-          autoFocus
-        />
-        <button type="submit" disabled={!newMessageText}>
-          Send
-        </button>
-      </form>
-    </main>
+    <nav className="bg-white border-b border-gray-200 px-8 py-4">
+      <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="flex items-center space-x-6">
+          <h1 className="text-xl font-bold text-gray-900">Parking Portal</h1>
+          <div className="flex space-x-2">
+            <Link to="/admin">
+              <Button 
+                variant={location.pathname === "/admin" ? "default" : "outline"}
+                size="sm"
+              >
+                Admin Portal
+              </Button>
+            </Link>
+            <Link to="/user">
+              <Button 
+                variant={location.pathname === "/user" ? "default" : "outline"}
+                size="sm"
+              >
+                User Portal
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </nav>
   );
 }
 
-function getOrSetFakeName() {
-  const NAME_KEY = "tutorial_name";
-  const name = sessionStorage.getItem(NAME_KEY);
-  if (!name) {
-    const newName = faker.person.firstName();
-    sessionStorage.setItem(NAME_KEY, newName);
-    return newName;
-  }
-  return name;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <Routes>
+          <Route path="/" element={<UserPage />} />
+          <Route path="/user" element={<UserPage />} />
+          <Route path="/admin" element={<AdminPage />} />
+        </Routes>
+      </div>
+    </BrowserRouter>
+  );
 }
