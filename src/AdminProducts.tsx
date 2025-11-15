@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ArrowLeft, Plus, Edit2, Trash2, DollarSign } from "lucide-react";
 
-export default function ProductManagementPage({
+export default function AdminProducts({
   garageId,
   onBack,
 }: {
@@ -199,30 +199,8 @@ export default function ProductManagementPage({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-4">
-                <Button variant="outline" size="sm" onClick={onBack}>
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back
-                </Button>
-                <div>
-                  <h1 className="text-3xl font-bold text-gray-900">Product Management</h1>
-                  <p className="text-sm text-gray-500 mt-1">{garage.name}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left Column: Products */}
           <div className="space-y-4">
             <Card>
@@ -375,7 +353,6 @@ export default function ProductManagementPage({
             )}
           </div>
         </div>
-      </div>
 
       {/* Product Modal */}
       <Dialog open={isAddingProduct || isEditingProduct} onOpenChange={(open) => !open && handleCancelProductEdit()}>

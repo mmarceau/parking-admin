@@ -503,3 +503,120 @@ export const deleteProductPrice = mutation({
   },
 });
 
+/**
+ * Admin: Get subscriptions for a garage with full details
+ */
+export const getGarageSubscriptionsWithDetails = query({
+  args: { garageId: v.id("garages") },
+  handler: async (ctx, { garageId }) => {
+    const subscriptions = await ctx.db
+      .query("subscriptions")
+      .filter((q) => q.eq(q.field("garageId"), garageId))
+      .collect();
+    
+    const subscriptionsWithDetails = await Promise.all(
+      subscriptions.map(async (subscription) => {
+        const [user, product] = await Promise.all([
+          ctx.db.get(subscription.userId),
+          ctx.db.get(subscription.productId),
+        ]);
+        
+        return {
+          ...subscription,
+          user,
+          product,
+        };
+      })
+    );
+    
+    return subscriptionsWithDetails;
+  },
+});
+
+/**
+ * Admin: Create a new subscription
+ */
+export const createSubscription = mutation({
+  args: {
+    userId: v.id("users"),
+    garageId: v.id("garages"),
+    productId: v.id("products"),
+    startDate: v.string(),
+    endDate: v.union(v.string(), v.null()),
+    dueDate: v.string(),
+    stripeSubscriptionId: v.string(),
+    seats: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Validate user exists
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    
+    // Validate garage exists
+    const garage = await ctx.db.get(args.garageId);
+    if (!garage) {
+      throw new Error("Garage not found");
+    }
+    
+    // Validate product exists
+    const product = await ctx.db.get(args.productId);
+    if (!product) {
+      throw new Error("Product not found");
+    }
+    
+    const now = new Date().toISOString();
+    const subscriptionId = await ctx.db.insert("subscriptions", {
+      ...args,
+      createdAt: now,
+      updatedAt: now,
+    });
+    
+    return subscriptionId;
+  },
+});
+
+/**
+ * Admin: Update a subscription
+ */
+export const updateSubscription = mutation({
+  args: {
+    subscriptionId: v.id("subscriptions"),
+    startDate: v.string(),
+    endDate: v.union(v.string(), v.null()),
+    dueDate: v.string(),
+    stripeSubscriptionId: v.string(),
+    seats: v.number(),
+  },
+  handler: async (ctx, { subscriptionId, ...updates }) => {
+    const subscription = await ctx.db.get(subscriptionId);
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+    
+    await ctx.db.patch(subscriptionId, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+    
+    return subscriptionId;
+  },
+});
+
+/**
+ * Admin: Delete a subscription
+ */
+export const deleteSubscription = mutation({
+  args: { subscriptionId: v.id("subscriptions") },
+  handler: async (ctx, { subscriptionId }) => {
+    const subscription = await ctx.db.get(subscriptionId);
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+    
+    await ctx.db.delete(subscriptionId);
+    return subscriptionId;
+  },
+});
+

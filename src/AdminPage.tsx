@@ -3,7 +3,8 @@ import { useQuery, useMutation } from "convex/react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
-import ProductManagementPage from "./ProductManagementPage";
+import AdminProducts from "./AdminProducts";
+import AdminSubscriptions from "./AdminSubscriptions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,7 @@ import {
   User
 } from "lucide-react";
 
-type View = "admin-selection" | "admin-dashboard" | "product-management";
+type View = "admin-selection" | "admin-dashboard" | "product-management" | "subscription-management";
 
 // Search Box Component for Admin Page
 function SearchBox() {
@@ -184,6 +185,7 @@ export default function AdminPage() {
   const [selectedUserId, setSelectedUserId] = useState<Id<"users"> | null>(null);
   const [selectedTab, setSelectedTab] = useState<string>("dashboard");
   const [productManagementGarageId, setProductManagementGarageId] = useState<Id<"garages"> | null>(null);
+  const [subscriptionManagementGarageId, setSubscriptionManagementGarageId] = useState<Id<"garages"> | null>(null);
   
   const users = useQuery(api.admin.getAllUsers);
   const dataStats = useQuery(api.admin.getDashboardOverview);
@@ -196,12 +198,16 @@ export default function AdminPage() {
     const tab = searchParams.get("tab");
     const view = searchParams.get("view");
     const productGarageId = searchParams.get("productGarageId");
+    const subscriptionGarageId = searchParams.get("subscriptionGarageId");
     
     if (adminId) {
       setSelectedAdminId(adminId as Id<"users">);
       if (view === "product-management" && productGarageId) {
         setCurrentView("product-management");
         setProductManagementGarageId(productGarageId as Id<"garages">);
+      } else if (view === "subscription-management" && subscriptionGarageId) {
+        setCurrentView("subscription-management");
+        setSubscriptionManagementGarageId(subscriptionGarageId as Id<"garages">);
       } else {
         setCurrentView("admin-dashboard");
       }
@@ -275,6 +281,24 @@ export default function AdminPage() {
     setSearchParams(params);
   };
 
+  const handleNavigateToSubscriptionManagement = (garageId: Id<"garages">) => {
+    setSubscriptionManagementGarageId(garageId);
+    setCurrentView("subscription-management");
+    setSearchParams({ 
+      adminId: selectedAdminId!, 
+      view: "subscription-management", 
+      subscriptionGarageId: garageId 
+    });
+  };
+
+  const handleBackFromSubscriptionManagement = () => {
+    setSubscriptionManagementGarageId(null);
+    setCurrentView("admin-dashboard");
+    const params = new URLSearchParams();
+    if (selectedAdminId) params.set("adminId", selectedAdminId);
+    setSearchParams(params);
+  };
+
   const selectedAdmin = users?.find((u) => u._id === selectedAdminId);
 
   // View 1: Admin Selection
@@ -322,14 +346,24 @@ export default function AdminPage() {
   // View 2: Product Management
   if (currentView === "product-management" && productManagementGarageId) {
     return (
-      <ProductManagementPage 
+      <AdminProducts 
         garageId={productManagementGarageId}
         onBack={handleBackFromProductManagement}
       />
     );
   }
 
-  // View 3: Admin Dashboard
+  // View 3: Subscription Management
+  if (currentView === "subscription-management" && subscriptionManagementGarageId) {
+    return (
+      <AdminSubscriptions 
+        garageId={subscriptionManagementGarageId}
+        onBack={handleBackFromSubscriptionManagement}
+      />
+    );
+  }
+
+  // View 4: Admin Dashboard
   if (currentView === "admin-dashboard") {
     if (!dataStats) {
       return (
@@ -367,12 +401,10 @@ export default function AdminPage() {
       {/* Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="garages">Garages</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="subscriptions">Subscriptions</TabsTrigger>
-            <TabsTrigger value="products">Products</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-6">
@@ -385,6 +417,7 @@ export default function AdminPage() {
                 garageId={selectedGarageId} 
                 onBack={handleGarageBack}
                 onNavigateToProducts={handleNavigateToProductManagement}
+                onNavigateToSubscriptions={handleNavigateToSubscriptionManagement}
               />
             ) : (
               <GaragesList onSelectGarage={handleGarageSelect} />
@@ -400,14 +433,6 @@ export default function AdminPage() {
             ) : (
               <UsersTab onSelectUser={handleUserSelect} />
             )}
-          </TabsContent>
-
-          <TabsContent value="subscriptions" className="mt-6">
-            <SubscriptionsTab />
-          </TabsContent>
-
-          <TabsContent value="products" className="mt-6">
-            <ProductsTab />
           </TabsContent>
         </Tabs>
       </div>
@@ -577,13 +602,16 @@ function GaragesList({ onSelectGarage }: { onSelectGarage: (id: Id<"garages">) =
 function GarageDetail({ 
   garageId, 
   onBack, 
-  onNavigateToProducts 
+  onNavigateToProducts,
+  onNavigateToSubscriptions 
 }: { 
   garageId: Id<"garages">; 
   onBack: () => void;
   onNavigateToProducts: (garageId: Id<"garages">) => void;
+  onNavigateToSubscriptions: (garageId: Id<"garages">) => void;
 }) {
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<"details" | "products" | "subscriptions">("details");
   const [formData, setFormData] = useState({
     name: "",
     address1: "",
@@ -662,37 +690,77 @@ function GarageDetail({
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
-            <Button onClick={handleEditClick}>Edit Garage Details</Button>
-            <Button variant="outline" onClick={() => onNavigateToProducts(garageId)}>Manage Products</Button>
-            <Button variant="outline">Manage Subscriptions</Button>
-            <Button variant="outline">View Reports</Button>
-            <Button variant="outline">Manage Staff</Button>
-            <Button variant="outline">Configure Pricing</Button>
-            <Button variant="destructive">Deactivate Garage</Button>
+            <Button 
+              onClick={handleEditClick}
+              variant={currentView === "details" ? "default" : "outline"}
+            >
+              Edit Garage Details
+            </Button>
+            <Button 
+              variant={currentView === "products" ? "default" : "outline"}
+              onClick={() => setCurrentView("products")}
+            >
+              Manage Products
+            </Button>
+            <Button 
+              variant={currentView === "subscriptions" ? "default" : "outline"}
+              onClick={() => setCurrentView("subscriptions")}
+            >
+              Manage Subscriptions
+            </Button>
+            {currentView !== "details" && (
+              <Button variant="ghost" onClick={() => setCurrentView("details")}>
+                Back to Details
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader>
-            <CardDescription>Total Subscriptions</CardDescription>
-            <CardTitle className="text-2xl">{stats.totalSubscriptions}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Active Subscriptions</CardDescription>
-            <CardTitle className="text-2xl">{stats.activeSubscriptions}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Total Staff</CardDescription>
-            <CardTitle className="text-2xl">{stats.totalStaff}</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
+
+      {/* Conditional Content */}
+      {currentView === "details" && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader>
+                <CardDescription>Total Subscriptions</CardDescription>
+                <CardTitle className="text-2xl">{stats.totalSubscriptions}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardDescription>Active Subscriptions</CardDescription>
+                <CardTitle className="text-2xl">{stats.activeSubscriptions}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardDescription>Total Staff</CardDescription>
+                <CardTitle className="text-2xl">{stats.totalStaff}</CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+        </>
+      )}
+
+      {currentView === "products" && (
+        <div className="mt-6">
+          <AdminProducts 
+            garageId={garageId}
+            onBack={() => setCurrentView("details")}
+          />
+        </div>
+      )}
+
+      {currentView === "subscriptions" && (
+        <div className="mt-6">
+          <AdminSubscriptions 
+            garageId={garageId}
+            onBack={() => setCurrentView("details")}
+          />
+        </div>
+      )}
 
 
 
@@ -1041,163 +1109,3 @@ function UserDetail({ userId, onBack }: { userId: Id<"users">; onBack: () => voi
   );
 }
 
-// Subscriptions Tab Component
-function SubscriptionsTab() {
-  const dataStats = useQuery(api.admin.getDashboardOverview);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>All Subscriptions</CardTitle>
-        <CardDescription>
-          {dataStats?.businessMetrics.activeSubscriptions || 0} active out of {dataStats?.counts.subscriptions || 0} total
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Total Subscriptions</CardDescription>
-              <CardTitle className="text-2xl">{dataStats?.counts.subscriptions || 0}</CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Active</CardDescription>
-              <CardTitle className="text-2xl text-green-600">
-                {dataStats?.businessMetrics.activeSubscriptions || 0}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Total Seats</CardDescription>
-              <CardTitle className="text-2xl">{dataStats?.businessMetrics.totalSeats || 0}</CardTitle>
-            </CardHeader>
-          </Card>
-        </div>
-        <div className="flex gap-3 justify-center">
-          <Button variant="outline">View All Subscriptions</Button>
-          <Button variant="outline">Generate Report</Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// Products Tab Component
-function ProductsTab() {
-  const dataStats = useQuery(api.admin.getDashboardOverview);
-  const productComparison = useQuery(api.admin.getAllProducts);
-
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Products Overview</CardTitle>
-          <CardDescription>
-            {dataStats?.businessMetrics.activeProducts || 0} active out of {dataStats?.counts.products || 0} total products
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Total Products</CardDescription>
-                <CardTitle className="text-2xl">{dataStats?.counts.products || 0}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Active Products</CardDescription>
-                <CardTitle className="text-2xl text-green-600">
-                  {dataStats?.businessMetrics.activeProducts || 0}
-                </CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardDescription>Price Points</CardDescription>
-                <CardTitle className="text-2xl">{dataStats?.counts.productPrices || 0}</CardTitle>
-              </CardHeader>
-            </Card>
-          </div>
-        </CardContent>
-      </Card>
-
-      {productComparison && productComparison.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Product Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {productComparison.map(({ product, prices, stats }) => {
-                const activePrices = prices.filter(p => p.isActive);
-                const priceValues = activePrices.map(p => p.amount);
-                const lowestPrice = priceValues.length > 0 ? Math.min(...priceValues) : null;
-                const highestPrice = priceValues.length > 0 ? Math.max(...priceValues) : null;
-                
-                return (
-                  <div key={product._id} className="border rounded-lg p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-lg">{product.name}</h3>
-                          {product.isActive ? (
-                            <Badge variant="secondary">Active</Badge>
-                          ) : (
-                            <Badge variant="outline">Inactive</Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Type: {product.type} • Seats: {product.availableSeats}
-                        </p>
-                        <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                          <div>
-                            <p className="text-gray-500">Price Points</p>
-                            <p className="font-medium">{stats.totalPrices}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">Active Prices</p>
-                            <p className="font-medium">{stats.activePrices}</p>
-                          </div>
-                          {lowestPrice !== null && (
-                            <div>
-                              <p className="text-gray-500">Lowest Price</p>
-                              <p className="font-medium">${lowestPrice}</p>
-                            </div>
-                          )}
-                          {highestPrice !== null && (
-                            <div>
-                              <p className="text-gray-500">Highest Price</p>
-                              <p className="font-medium">${highestPrice}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <Button variant="outline" size="sm">Edit</Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Actions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-3">
-            <Button>Add New Product</Button>
-            <Button variant="outline">Manage Pricing</Button>
-            <Button variant="outline">Product Analytics</Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
