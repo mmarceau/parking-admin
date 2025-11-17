@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useAction } from "convex/react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
@@ -14,6 +14,7 @@ export default function UserPage() {
   const [currentView, setCurrentView] = useState<View>("user-selection");
   const [selectedUserId, setSelectedUserId] = useState<Id<"users"> | null>(null);
   const [selectedGarageId, setSelectedGarageId] = useState<Id<"garages"> | null>(null);
+  const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
 
   // Queries
   const users = useQuery(api.user.getAllUsers);
@@ -27,18 +28,31 @@ export default function UserPage() {
     selectedUserId ? { userId: selectedUserId } : "skip"
   );
 
-  // Mutation
-  const subscribe = useMutation(api.user.subscribe);
+  // Actions
+  const createCheckoutSession = useAction(api.checkout.createCheckoutSession);
 
   // Handle URL parameters on mount and when they change
   useEffect(() => {
     const userId = searchParams.get("userId");
+    const checkout = searchParams.get("checkout");
+    const sessionId = searchParams.get("session_id");
     
     if (userId) {
       setSelectedUserId(userId as Id<"users">);
       setCurrentView("user-dashboard");
+      
+      // Handle checkout success/cancel
+      if (checkout === "success" && sessionId) {
+        alert("🎉 Payment successful! Your subscription is now active.");
+        // Clean up URL params
+        setSearchParams({ userId });
+      } else if (checkout === "cancelled") {
+        alert("Payment was cancelled. You can try again anytime.");
+        // Clean up URL params
+        setSearchParams({ userId });
+      }
     }
-  }, [searchParams]);
+  }, [searchParams, setSearchParams]);
 
   const handleUserSelect = (userId: Id<"users">) => {
     setSelectedUserId(userId);
@@ -62,24 +76,43 @@ export default function UserPage() {
     setSearchParams({});
   };
 
-  const handleSubscribe = async (productId: Id<"products">, seats: number) => {
+  const handleSubscribe = async (
+    productId: Id<"products">, 
+    priceId: Id<"productPrices">,
+    seats: number
+  ) => {
     if (!selectedUserId || !selectedGarageId) {
       alert("Please select a user and a garage first");
       return;
     }
 
+    setIsProcessingCheckout(true);
+
     try {
-      await subscribe({
+      // Create a Stripe Checkout session
+      const result = await createCheckoutSession({
+        priceId,
+        productId,
         userId: selectedUserId,
         garageId: selectedGarageId,
-        productId,
-        seats,
+        quantity: seats,
       });
-      alert("Subscription created successfully!");
-      setCurrentView("user-dashboard");
-      setSelectedGarageId(null);
+
+      if (!result.success || !result.sessionId) {
+        throw new Error(result.error || "Failed to create checkout session");
+      }
+
+      // Redirect to Stripe Checkout
+      // Use the session URL directly (recommended approach)
+      if (result.sessionUrl) {
+        window.location.href = result.sessionUrl;
+      } else {
+        throw new Error("No checkout URL returned");
+      }
     } catch (error) {
+      console.error("Checkout error:", error);
       alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      setIsProcessingCheckout(false);
     }
   };
 
@@ -289,12 +322,18 @@ export default function UserPage() {
                                 <div className="text-lg font-bold text-blue-600">
                                   ${(price.amount / 100).toFixed(2)}
                                 </div>
+                                {!price.stripePriceId && (
+                                  <div className="text-xs text-amber-600 mt-1">
+                                    ⚠️ Payment not configured for this price
+                                  </div>
+                                )}
                               </div>
                               <Button
-                                onClick={() => handleSubscribe(product._id, 1)}
+                                onClick={() => handleSubscribe(product._id, price._id, 1)}
                                 size="sm"
+                                disabled={isProcessingCheckout || !price.stripePriceId}
                               >
-                                Subscribe
+                                {isProcessingCheckout ? "Processing..." : "Subscribe"}
                               </Button>
                             </div>
                           ))}

@@ -9,8 +9,12 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as checkout from "../checkout.js";
+import type * as http from "../http.js";
 import type * as seed from "../seed.js";
+import type * as stripe from "../stripe.js";
 import type * as user from "../user.js";
+import type * as webhooks from "../webhooks.js";
 
 import type {
   ApiFromModules,
@@ -20,8 +24,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  checkout: typeof checkout;
+  http: typeof http;
   seed: typeof seed;
+  stripe: typeof stripe;
   user: typeof user;
+  webhooks: typeof webhooks;
 }>;
 
 /**

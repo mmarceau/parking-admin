@@ -1,5 +1,6 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalAction } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 
 /**
  * Admin: Get all garages
@@ -336,6 +337,8 @@ export const createProduct = mutation({
     }
     
     const now = new Date().toISOString();
+    
+    // Create product in database first
     const productId = await ctx.db.insert("products", {
       ...productData,
       garageId,
@@ -343,6 +346,23 @@ export const createProduct = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    
+    // If no Stripe product ID provided, create one in Stripe
+    if (!stripeProductId) {
+      try {
+        // Schedule Stripe product creation
+        await ctx.scheduler.runAfter(0, internal.admin.createStripeProductInternal, {
+          productId,
+          name: productData.name,
+          type: productData.type,
+          garageId,
+          garageName: garage.name,
+        });
+      } catch (error) {
+        console.error("Failed to schedule Stripe product creation:", error);
+        // Don't throw error - allow product creation to succeed even if Stripe fails
+      }
+    }
     
     return productId;
   },
@@ -366,11 +386,26 @@ export const updateProduct = mutation({
       throw new Error("Product not found");
     }
     
+    // Update product in database
     await ctx.db.patch(productId, {
       ...updates,
-      stripeProductId: stripeProductId || null,
+      stripeProductId: stripeProductId || product.stripeProductId,
       updatedAt: new Date().toISOString(),
     });
+    
+    // If product has a Stripe ID, update it in Stripe
+    const finalStripeProductId = stripeProductId || product.stripeProductId;
+    if (finalStripeProductId) {
+      try {
+        await ctx.scheduler.runAfter(0, internal.admin.updateStripeProductInternal, {
+          stripeProductId: finalStripeProductId,
+          name: updates.name,
+          isActive: updates.isActive,
+        });
+      } catch (error) {
+        console.error("Failed to schedule Stripe product update:", error);
+      }
+    }
     
     return productId;
   },
@@ -455,6 +490,21 @@ export const createProductPrice = mutation({
       updatedAt: now,
     });
     
+    // If no Stripe price ID provided and product has a Stripe ID, create price in Stripe
+    if (!stripePriceId && product.stripeProductId) {
+      try {
+        await ctx.scheduler.runAfter(0, internal.admin.createStripePriceInternal, {
+          priceId,
+          stripeProductId: product.stripeProductId,
+          name: priceData.name,
+          amount: priceData.amount,
+          productType: product.type,
+        });
+      } catch (error) {
+        console.error("Failed to schedule Stripe price creation:", error);
+      }
+    }
+    
     return priceId;
   },
 });
@@ -477,11 +527,26 @@ export const updateProductPrice = mutation({
       throw new Error("Price not found");
     }
     
+    // Update price in database
     await ctx.db.patch(priceId, {
       ...updates,
-      stripePriceId: stripePriceId || null,
+      stripePriceId: stripePriceId || price.stripePriceId,
       updatedAt: new Date().toISOString(),
     });
+    
+    // If price has a Stripe ID, update it in Stripe
+    // Note: Stripe only allows updating the active status, not the amount
+    const finalStripePriceId = stripePriceId || price.stripePriceId;
+    if (finalStripePriceId) {
+      try {
+        await ctx.scheduler.runAfter(0, internal.admin.updateStripePriceInternal, {
+          stripePriceId: finalStripePriceId,
+          isActive: updates.isActive,
+        });
+      } catch (error) {
+        console.error("Failed to schedule Stripe price update:", error);
+      }
+    }
     
     return priceId;
   },
@@ -617,6 +682,173 @@ export const deleteSubscription = mutation({
     
     await ctx.db.delete(subscriptionId);
     return subscriptionId;
+  },
+});
+
+// ========================================
+// STRIPE INTEGRATION INTERNAL ACTIONS
+// ========================================
+
+/**
+ * Internal action: Create a product in Stripe and update database
+ */
+export const createStripeProductInternal = internalAction({
+  args: {
+    productId: v.id("products"),
+    name: v.string(),
+    type: v.string(),
+    garageId: v.id("garages"),
+    garageName: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { api } = await import("./_generated/api");
+    
+    // Call Stripe action to create product
+    const result = await ctx.runAction(api.stripe.createStripeProduct, {
+      name: args.name,
+      description: `${args.type} pass for ${args.garageName}`,
+      metadata: {
+        productId: args.productId,
+        garageId: args.garageId,
+        type: args.type,
+      },
+    });
+    
+    if (result.success && result.stripeProductId) {
+      // Update the product with the Stripe product ID
+      await ctx.runMutation(api.admin.patchProductStripeId, {
+        productId: args.productId,
+        stripeProductId: result.stripeProductId,
+      });
+    } else {
+      console.error("Failed to create Stripe product:", result.error);
+    }
+  },
+});
+
+/**
+ * Internal action: Update a product in Stripe
+ */
+export const updateStripeProductInternal = internalAction({
+  args: {
+    stripeProductId: v.string(),
+    name: v.string(),
+    isActive: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { api } = await import("./_generated/api");
+    
+    // Call Stripe action to update product
+    const result = await ctx.runAction(api.stripe.updateStripeProduct, {
+      stripeProductId: args.stripeProductId,
+      name: args.name,
+      active: args.isActive,
+    });
+    
+    if (!result.success) {
+      console.error("Failed to update Stripe product:", result.error);
+    }
+  },
+});
+
+/**
+ * Internal action: Create a price in Stripe and update database
+ */
+export const createStripePriceInternal = internalAction({
+  args: {
+    priceId: v.id("productPrices"),
+    stripeProductId: v.string(),
+    name: v.string(),
+    amount: v.number(),
+    productType: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { api } = await import("./_generated/api");
+    
+    // Determine if this is a recurring price based on product type
+    const recurring = args.productType === "monthly" || args.productType === "annual"
+      ? {
+          interval: args.productType === "monthly" ? "month" : "year",
+          interval_count: 1,
+        }
+      : undefined;
+    
+    // Call Stripe action to create price
+    const result = await ctx.runAction(api.stripe.createStripePrice, {
+      stripeProductId: args.stripeProductId,
+      unitAmount: args.amount,
+      currency: "usd",
+      recurring,
+      metadata: {
+        priceId: args.priceId,
+        name: args.name,
+      },
+    });
+    
+    if (result.success && result.stripePriceId) {
+      // Update the price with the Stripe price ID
+      await ctx.runMutation(api.admin.patchProductPriceStripeId, {
+        priceId: args.priceId,
+        stripePriceId: result.stripePriceId,
+      });
+    } else {
+      console.error("Failed to create Stripe price:", result.error);
+    }
+  },
+});
+
+/**
+ * Internal action: Update a price in Stripe
+ */
+export const updateStripePriceInternal = internalAction({
+  args: {
+    stripePriceId: v.string(),
+    isActive: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { api } = await import("./_generated/api");
+    
+    // Call Stripe action to update price
+    const result = await ctx.runAction(api.stripe.updateStripePrice, {
+      stripePriceId: args.stripePriceId,
+      active: args.isActive,
+    });
+    
+    if (!result.success) {
+      console.error("Failed to update Stripe price:", result.error);
+    }
+  },
+});
+
+/**
+ * Internal helper: Patch product with Stripe product ID
+ */
+export const patchProductStripeId = mutation({
+  args: {
+    productId: v.id("products"),
+    stripeProductId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.productId, {
+      stripeProductId: args.stripeProductId,
+      updatedAt: new Date().toISOString(),
+    });
+  },
+});
+
+/**
+ * Internal helper: Patch product price with Stripe price ID
+ */
+export const patchProductPriceStripeId = mutation({
+  args: {
+    priceId: v.id("productPrices"),
+    stripePriceId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.priceId, {
+      stripePriceId: args.stripePriceId,
+      updatedAt: new Date().toISOString(),
+    });
   },
 });
 
