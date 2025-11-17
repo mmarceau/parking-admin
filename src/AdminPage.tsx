@@ -5,7 +5,7 @@ import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
 import AdminProducts from "./AdminProducts";
 import AdminSubscriptions from "./AdminSubscriptions";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import AdminUser from "./AdminUser";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,14 +21,12 @@ import {
 } from "@/components/ui/dialog";
 import { 
   MapPin, 
-  Mail, 
-  Phone, 
   ArrowLeft,
   Search,
   User
 } from "lucide-react";
 
-type View = "admin-selection" | "admin-dashboard" | "product-management" | "subscription-management";
+type View = "admin-selection" | "admin-dashboard" | "product-management" | "subscription-management" | "user-management";
 
 // Search Box Component for Admin Page
 function SearchBox() {
@@ -97,42 +95,30 @@ function SearchBox() {
                       Users ({filteredUsers.slice(0, 5).length})
                     </div>
                     {filteredUsers.slice(0, 5).map((user) => (
-                      <div key={user._id} className="flex gap-1">
-                        <button
-                          onClick={() => {
-                            setIsOpen(false);
-                            setSearchTerm("");
-                            navigate(`/user?userId=${user._id}`);
-                          }}
-                          className="flex-1 flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 transition-colors text-left"
-                        >
-                          <User className="h-4 w-4 text-gray-400" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900">
-                              {user.firstName} {user.lastName}
-                            </div>
-                            <div className="text-sm text-gray-500 truncate">
-                              {user.email || "No email"}
-                            </div>
+                      <button
+                        key={user._id}
+                        onClick={() => {
+                          setIsOpen(false);
+                          setSearchTerm("");
+                          if (adminId) {
+                            navigate(`/admin?adminId=${adminId}&userId=${user._id}`);
+                          }
+                        }}
+                        className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 transition-colors text-left"
+                      >
+                        <User className="h-4 w-4 text-gray-400" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900">
+                            {user.firstName} {user.lastName}
                           </div>
-                          <Badge variant="outline" className="text-xs">
-                            {user.stats?.activeSubscriptions || 0} subs
-                          </Badge>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setIsOpen(false);
-                            setSearchTerm("");
-                            if (adminId) {
-                              navigate(`/admin?adminId=${adminId}&userId=${user._id}`);
-                            }
-                          }}
-                          className="px-3 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                          title="View in Admin"
-                        >
-                          Admin
-                        </button>
-                      </div>
+                          <div className="text-sm text-gray-500 truncate">
+                            {user.email || "No email"}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-xs">
+                          {user.stats?.activeSubscriptions || 0} subs
+                        </Badge>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -182,20 +168,17 @@ export default function AdminPage() {
   const [currentView, setCurrentView] = useState<View>("admin-selection");
   const [selectedAdminId, setSelectedAdminId] = useState<Id<"users"> | null>(null);
   const [selectedGarageId, setSelectedGarageId] = useState<Id<"garages"> | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState<Id<"users"> | null>(null);
-  const [selectedTab, setSelectedTab] = useState<string>("dashboard");
   const [productManagementGarageId, setProductManagementGarageId] = useState<Id<"garages"> | null>(null);
   const [subscriptionManagementGarageId, setSubscriptionManagementGarageId] = useState<Id<"garages"> | null>(null);
+  const [userManagementUserId, setUserManagementUserId] = useState<Id<"users"> | null>(null);
   
   const users = useQuery(api.admin.getAllUsers);
-  const dataStats = useQuery(api.admin.getDashboardOverview);
 
   // Handle URL parameters on mount and when they change
   useEffect(() => {
     const adminId = searchParams.get("adminId");
     const garageId = searchParams.get("garageId");
     const userId = searchParams.get("userId");
-    const tab = searchParams.get("tab");
     const view = searchParams.get("view");
     const productGarageId = searchParams.get("productGarageId");
     const subscriptionGarageId = searchParams.get("subscriptionGarageId");
@@ -208,20 +191,15 @@ export default function AdminPage() {
       } else if (view === "subscription-management" && subscriptionGarageId) {
         setCurrentView("subscription-management");
         setSubscriptionManagementGarageId(subscriptionGarageId as Id<"garages">);
+      } else if (userId) {
+        setCurrentView("user-management");
+        setUserManagementUserId(userId as Id<"users">);
+      } else if (garageId) {
+        setSelectedGarageId(garageId as Id<"garages">);
+        setCurrentView("admin-dashboard");
       } else {
         setCurrentView("admin-dashboard");
       }
-    }
-    if (garageId) {
-      setSelectedGarageId(garageId as Id<"garages">);
-      setSelectedTab("garages");
-    }
-    if (userId) {
-      setSelectedUserId(userId as Id<"users">);
-      setSelectedTab("users");
-    }
-    if (tab) {
-      setSelectedTab(tab);
     }
   }, [searchParams]);
 
@@ -234,7 +212,6 @@ export default function AdminPage() {
   const handleBackToAdminSelection = () => {
     setSelectedAdminId(null);
     setSelectedGarageId(null);
-    setSelectedUserId(null);
     setCurrentView("admin-selection");
     setSearchParams({});
   };
@@ -246,18 +223,6 @@ export default function AdminPage() {
 
   const handleGarageBack = () => {
     setSelectedGarageId(null);
-    const params = new URLSearchParams();
-    if (selectedAdminId) params.set("adminId", selectedAdminId);
-    setSearchParams(params);
-  };
-
-  const handleUserSelect = (userId: Id<"users">) => {
-    setSelectedUserId(userId);
-    setSearchParams({ adminId: selectedAdminId!, userId });
-  };
-
-  const handleUserBack = () => {
-    setSelectedUserId(null);
     const params = new URLSearchParams();
     if (selectedAdminId) params.set("adminId", selectedAdminId);
     setSearchParams(params);
@@ -299,6 +264,23 @@ export default function AdminPage() {
     setSearchParams(params);
   };
 
+  const handleNavigateToUserManagement = (userId: Id<"users">) => {
+    setUserManagementUserId(userId);
+    setCurrentView("user-management");
+    setSearchParams({ 
+      adminId: selectedAdminId!, 
+      userId: userId 
+    });
+  };
+
+  const handleBackFromUserManagement = () => {
+    setUserManagementUserId(null);
+    setCurrentView("admin-dashboard");
+    const params = new URLSearchParams();
+    if (selectedAdminId) params.set("adminId", selectedAdminId);
+    setSearchParams(params);
+  };
+
   const selectedAdmin = users?.find((u) => u._id === selectedAdminId);
 
   // View 1: Admin Selection
@@ -330,8 +312,50 @@ export default function AdminPage() {
                       <div className="font-medium text-gray-900">
                         {user.firstName} {user.lastName}
                       </div>
-                      <div className="text-sm text-gray-600">{user.email || "No email"}</div>
-                      <Badge className="mt-2 text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-100">Admin</Badge>
+                      <div className="text-sm text-gray-600 mb-2">{user.email || "No email"}</div>
+                      
+                      {/* Roles Section */}
+                      {user.isSuperAdmin ? (
+                        <div className="mb-2 space-y-1">
+                          <div className="text-xs text-gray-700">
+                            <Badge variant="outline" className="text-xs">
+                              All Garages
+                            </Badge>
+                          </div>
+                        </div>
+                      ) : user.roles && user.roles.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {user.roles.slice(0, 2).map((role, idx) => (
+                            <div key={idx} className="text-xs text-gray-700">
+                              <Badge variant="outline" className="text-xs">
+                                {role.roleName} @ {role.garageName}
+                              </Badge>
+                            </div>
+                          ))}
+                          {user.roles.length > 2 && (
+                            <div className="text-xs text-gray-500">
+                              +{user.roles.length - 2} more role{user.roles.length - 2 > 1 ? 's' : ''}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Garages Section - Only show for regular Admin, not SuperAdmin */}
+                      {!user.isSuperAdmin && user.garages && user.garages.length > 0 && (
+                        <div className="text-xs text-gray-600 mb-2">
+                          {user.garages.length === 1 ? (
+                            <span>{user.garages[0].name}</span>
+                          ) : (
+                            <span>{user.garages.length} garages</span>
+                          )}
+                        </div>
+                      )}
+                      
+                      {user.isSuperAdmin ? (
+                        <Badge className="mt-2 text-xs bg-orange-100 text-orange-700 hover:bg-orange-100">Super Admin</Badge>
+                      ) : (
+                        <Badge className="mt-2 text-xs bg-indigo-100 text-indigo-700 hover:bg-indigo-100">Admin</Badge>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -363,16 +387,18 @@ export default function AdminPage() {
     );
   }
 
-  // View 4: Admin Dashboard
-  if (currentView === "admin-dashboard") {
-    if (!dataStats) {
-      return (
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-lg">Loading...</div>
-        </div>
-      );
-    }
+  // View 4: User Management
+  if (currentView === "user-management" && userManagementUserId) {
+    return (
+      <AdminUser 
+        userId={userManagementUserId}
+        onBack={handleBackFromUserManagement}
+      />
+    );
+  }
 
+  // View 5: Admin Dashboard
+  if (currentView === "admin-dashboard") {
     return (
       <div>
         {/* Header */}
@@ -398,43 +424,23 @@ export default function AdminPage() {
           </div>
         </div>
 
-      {/* Tabs */}
+      {/* Garages View */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="garages">Garages</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="dashboard" className="mt-6">
-            <DashboardTab dataStats={dataStats} />
-          </TabsContent>
-
-          <TabsContent value="garages" className="mt-6">
-            {selectedGarageId ? (
-              <GarageDetail 
-                garageId={selectedGarageId} 
-                onBack={handleGarageBack}
-                onNavigateToProducts={handleNavigateToProductManagement}
-                onNavigateToSubscriptions={handleNavigateToSubscriptionManagement}
-              />
-            ) : (
-              <GaragesList onSelectGarage={handleGarageSelect} />
-            )}
-          </TabsContent>
-
-          <TabsContent value="users" className="mt-6">
-            {selectedUserId ? (
-              <UserDetail 
-                userId={selectedUserId} 
-                onBack={handleUserBack} 
-              />
-            ) : (
-              <UsersTab onSelectUser={handleUserSelect} />
-            )}
-          </TabsContent>
-        </Tabs>
+        {selectedGarageId ? (
+          <GarageDetail 
+            garageId={selectedGarageId} 
+            onBack={handleGarageBack}
+            onNavigateToProducts={handleNavigateToProductManagement}
+            onNavigateToSubscriptions={handleNavigateToSubscriptionManagement}
+          />
+        ) : (
+          <GaragesList 
+            onSelectGarage={handleGarageSelect} 
+            garageIds={selectedAdmin?.garages?.map(g => g._id) || []}
+            onBackToUsers={handleBackToAdminSelection}
+            isSuperAdmin={selectedAdmin?.isSuperAdmin || false}
+          />
+        )}
       </div>
     </div>
     );
@@ -443,104 +449,24 @@ export default function AdminPage() {
   return null;
 }
 
-// Dashboard Tab Component
-function DashboardTab({ dataStats }: { dataStats: any }) {
-  return (
-    <div className="space-y-6">
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total Garages</CardDescription>
-            <CardTitle className="text-3xl">{dataStats.counts.garages}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total Users</CardDescription>
-            <CardTitle className="text-3xl">{dataStats.counts.users}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Active Subscriptions</CardDescription>
-            <CardTitle className="text-3xl">{dataStats.businessMetrics.activeSubscriptions}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Products</CardDescription>
-            <CardTitle className="text-3xl">{dataStats.counts.products}</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-
-      {/* Additional Business Metrics */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Business Metrics</CardTitle>
-          <CardDescription>Key performance indicators</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Expired Subscriptions</p>
-              <p className="text-2xl font-bold text-gray-900">{dataStats.businessMetrics.expiredSubscriptions}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Retention Rate</p>
-              <p className="text-2xl font-bold text-green-600">{dataStats.businessMetrics.subscriptionRetentionRate}%</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Total Seats</p>
-              <p className="text-2xl font-bold text-gray-900">{dataStats.businessMetrics.totalSeats}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Avg Seats/Subscription</p>
-              <p className="text-2xl font-bold text-gray-900">{dataStats.businessMetrics.averageSeatsPerSubscription}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Active Products</p>
-              <p className="text-2xl font-bold text-green-600">{dataStats.businessMetrics.activeProducts}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Inactive Products</p>
-              <p className="text-2xl font-bold text-red-600">{dataStats.businessMetrics.inactiveProducts}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Entity Counts */}
-      <Card>
-        <CardHeader>
-          <CardTitle>System Overview</CardTitle>
-          <CardDescription>Total counts across the platform</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Total Subscriptions</p>
-              <p className="text-2xl font-bold text-gray-900">{dataStats.counts.subscriptions}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">User Roles</p>
-              <p className="text-2xl font-bold text-gray-900">{dataStats.counts.roles}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Product Prices</p>
-              <p className="text-2xl font-bold text-gray-900">{dataStats.counts.productPrices}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 // Garages List Component
-function GaragesList({ onSelectGarage }: { onSelectGarage: (id: Id<"garages">) => void }) {
-  const garages = useQuery(api.admin.getAllGarages);
+function GaragesList({ 
+  onSelectGarage, 
+  garageIds,
+  onBackToUsers,
+  isSuperAdmin 
+}: { 
+  onSelectGarage: (id: Id<"garages">) => void;
+  garageIds: Id<"garages">[];
+  onBackToUsers: () => void;
+  isSuperAdmin: boolean;
+}) {
+  const garages = useQuery(
+    api.admin.getGaragesByIds,
+    isSuperAdmin 
+      ? { garageIds: [], returnAll: true }
+      : garageIds.length > 0 ? { garageIds } : "skip"
+  );
 
   if (!garages) {
     return (
@@ -553,14 +479,20 @@ function GaragesList({ onSelectGarage }: { onSelectGarage: (id: Id<"garages">) =
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>All Garages</CardTitle>
-        <CardDescription>Click on a garage to view details and manage ({garages.length} total)</CardDescription>
-      </CardHeader>
-      <CardContent>
+    <div className="space-y-4">
+      <Button variant="outline" onClick={onBackToUsers}>
+        <ArrowLeft className="h-4 w-4 mr-2" />
+        Back to Users
+      </Button>
+      
+      <Card>
+        <CardHeader>
+          <CardTitle>{isSuperAdmin ? "All Garages" : "Your Garages"}</CardTitle>
+          <CardDescription>Click on a garage to view details and manage ({garages.length} total)</CardDescription>
+        </CardHeader>
+        <CardContent>
         {garages.length === 0 ? (
-          <p className="text-gray-500 text-center py-8">No garages found</p>
+          <p className="text-gray-500 text-center py-8">No garages associated with this user</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {garages.map((garage) => (
@@ -595,6 +527,7 @@ function GaragesList({ onSelectGarage }: { onSelectGarage: (id: Id<"garages">) =
         )}
       </CardContent>
     </Card>
+    </div>
   );
 }
 
@@ -611,7 +544,7 @@ function GarageDetail({
   onNavigateToSubscriptions: (garageId: Id<"garages">) => void;
 }) {
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const [currentView, setCurrentView] = useState<"details" | "products" | "subscriptions">("details");
+  const [currentView, setCurrentView] = useState<"products" | "subscriptions">("subscriptions");
   const [formData, setFormData] = useState({
     name: "",
     address1: "",
@@ -691,10 +624,10 @@ function GarageDetail({
         <CardContent>
           <div className="flex flex-wrap gap-3">
             <Button 
-              onClick={handleEditClick}
-              variant={currentView === "details" ? "default" : "outline"}
+              variant={currentView === "subscriptions" ? "default" : "outline"}
+              onClick={() => setCurrentView("subscriptions")}
             >
-              Edit Garage Details
+              Manage Subscriptions
             </Button>
             <Button 
               variant={currentView === "products" ? "default" : "outline"}
@@ -702,53 +635,16 @@ function GarageDetail({
             >
               Manage Products
             </Button>
-            <Button 
-              variant={currentView === "subscriptions" ? "default" : "outline"}
-              onClick={() => setCurrentView("subscriptions")}
-            >
-              Manage Subscriptions
-            </Button>
-            {currentView !== "details" && (
-              <Button variant="ghost" onClick={() => setCurrentView("details")}>
-                Back to Details
-              </Button>
-            )}
           </div>
         </CardContent>
       </Card>
 
       {/* Conditional Content */}
-      {currentView === "details" && (
-        <>
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader>
-                <CardDescription>Total Subscriptions</CardDescription>
-                <CardTitle className="text-2xl">{stats.totalSubscriptions}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardDescription>Active Subscriptions</CardDescription>
-                <CardTitle className="text-2xl">{stats.activeSubscriptions}</CardTitle>
-              </CardHeader>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardDescription>Total Staff</CardDescription>
-                <CardTitle className="text-2xl">{stats.totalStaff}</CardTitle>
-              </CardHeader>
-            </Card>
-          </div>
-        </>
-      )}
-
       {currentView === "products" && (
         <div className="mt-6">
           <AdminProducts 
             garageId={garageId}
-            onBack={() => setCurrentView("details")}
+            onBack={() => setCurrentView("subscriptions")}
           />
         </div>
       )}
@@ -757,7 +653,7 @@ function GarageDetail({
         <div className="mt-6">
           <AdminSubscriptions 
             garageId={garageId}
-            onBack={() => setCurrentView("details")}
+            onBack={() => setCurrentView("subscriptions")}
           />
         </div>
       )}
@@ -844,268 +740,3 @@ function GarageDetail({
     </div>
   );
 }
-
-// Users Tab Component
-function UsersTab({ onSelectUser }: { onSelectUser: (id: Id<"users">) => void }) {
-  const users = useQuery(api.admin.getAllUsers);
-
-  if (!users) {
-    return (
-      <Card>
-        <CardContent className="py-8">
-          <p className="text-center text-gray-500">Loading users...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>All Users</CardTitle>
-              <CardDescription>Total: {users.length} users</CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm">Add New User</Button>
-              <Button variant="outline" size="sm">Import Users</Button>
-              <Button variant="outline" size="sm">Export List</Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {users.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">No users found</p>
-          ) : (
-            <div className="space-y-3">
-              {users.map((user) => (
-                <div
-                  key={user._id}
-                  onClick={() => onSelectUser(user._id)}
-                  className="border rounded-lg p-4 hover:border-blue-500 hover:shadow-sm transition-all cursor-pointer"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-900">
-                          {user.firstName} {user.lastName}
-                        </h3>
-                        {user.stats.activeSubscriptions > 0 && (
-                          <Badge variant="secondary">
-                            {user.stats.activeSubscriptions} Active
-                          </Badge>
-                        )}
-                        {user.stats.roles > 0 && (
-                          <Badge variant="outline">
-                            {user.stats.roles} {user.stats.roles === 1 ? 'Role' : 'Roles'}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="space-y-1 text-sm text-gray-600">
-                        {user.email && (
-                          <p className="flex items-center">
-                            <Mail className="h-4 w-4 mr-2" />
-                            {user.email}
-                          </p>
-                        )}
-                        {user.phone && (
-                          <p className="flex items-center">
-                            <Phone className="h-4 w-4 mr-2" />
-                            {user.phone}
-                          </p>
-                        )}
-                        {user.stripeUserId && (
-                          <p className="text-xs text-gray-400">
-                            Stripe: {user.stripeUserId}
-                          </p>
-                        )}
-                      </div>
-                      <div className="mt-3 grid grid-cols-3 gap-4 text-sm pt-3 border-t">
-                        <div>
-                          <p className="text-gray-500">Subscriptions</p>
-                          <p className="font-medium text-gray-900">{user.stats.totalSubscriptions}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Active</p>
-                          <p className="font-medium text-green-600">{user.stats.activeSubscriptions}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Roles</p>
-                          <p className="font-medium text-gray-900">{user.stats.roles}</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="outline" size="sm" onClick={() => onSelectUser(user._id)}>
-                        View Details
-                      </Button>
-                      <Button variant="outline" size="sm">Edit</Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// User Detail Component
-function UserDetail({ userId, onBack }: { userId: Id<"users">; onBack: () => void }) {
-  const allUsers = useQuery(api.admin.getAllUsers);
-  const subscriptions = useQuery(api.admin.getAllSubscriptions);
-
-  const user = allUsers?.find((u) => u._id === userId);
-  const userSubscriptions = subscriptions?.filter((sub) => sub.subscription.userId === userId);
-
-  if (!user || !userSubscriptions) {
-    return (
-      <Card>
-        <CardContent className="py-8">
-          <p className="text-center text-gray-500">Loading user details...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const activeSubscriptions = userSubscriptions.filter((s) => s.subscription.endDate === null);
-  const expiredSubscriptions = userSubscriptions.filter((s) => s.subscription.endDate !== null);
-
-  return (
-    <div className="space-y-6">
-      {/* Back Button & Header */}
-      <Button variant="outline" size="sm" onClick={onBack}>
-        <ArrowLeft className="h-4 w-4 mr-2" />
-        Back to Users
-      </Button>
-
-      {/* User Overview Card */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-2xl">
-                {user.firstName} {user.lastName}
-              </CardTitle>
-              <CardDescription className="mt-2 space-y-1">
-                {user.email && (
-                  <p className="flex items-center text-base">
-                    <Mail className="h-4 w-4 mr-2" />
-                    {user.email}
-                  </p>
-                )}
-                {user.phone && (
-                  <p className="flex items-center text-base">
-                    <Phone className="h-4 w-4 mr-2" />
-                    {user.phone}
-                  </p>
-                )}
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm">Edit User</Button>
-              <Button variant="outline" size="sm">Delete</Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-4 gap-6">
-            <div className="text-center p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-500 mb-1">Total Subscriptions</p>
-              <p className="text-3xl font-bold text-gray-900">{userSubscriptions.length}</p>
-            </div>
-            <div className="text-center p-4 bg-green-50 rounded-lg">
-              <p className="text-sm text-gray-500 mb-1">Active</p>
-              <p className="text-3xl font-bold text-green-600">{activeSubscriptions.length}</p>
-            </div>
-            <div className="text-center p-4 bg-red-50 rounded-lg">
-              <p className="text-sm text-gray-500 mb-1">Expired</p>
-              <p className="text-3xl font-bold text-red-600">{expiredSubscriptions.length}</p>
-            </div>
-            <div className="text-center p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-gray-500 mb-1">Roles</p>
-              <p className="text-3xl font-bold text-blue-600">{user.stats.roles}</p>
-            </div>
-          </div>
-          {user.stripeUserId && (
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">Stripe Customer ID:</span> {user.stripeUserId}
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Subscriptions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Subscriptions</CardTitle>
-          <CardDescription>
-            {activeSubscriptions.length} active, {expiredSubscriptions.length} expired
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {userSubscriptions.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">No subscriptions found</p>
-          ) : (
-            <div className="space-y-3">
-              {userSubscriptions.map(({ subscription, user: _user, garage, product }) => (
-                <div
-                  key={subscription._id}
-                  className="border rounded-lg p-4"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-semibold text-gray-900">
-                          {product?.name || "Unknown Product"}
-                        </h3>
-                        <Badge variant={subscription.endDate ? "secondary" : "default"}>
-                          {subscription.endDate ? "Expired" : "Active"}
-                        </Badge>
-                      </div>
-                      <div className="space-y-1 text-sm text-gray-600">
-                        <p className="flex items-center">
-                          <MapPin className="h-4 w-4 mr-2" />
-                          {garage?.name || "Unknown Garage"}
-                        </p>
-                        <p>
-                          <span className="font-medium">Seats:</span> {subscription.seats}
-                        </p>
-                        <p>
-                          <span className="font-medium">Start Date:</span>{" "}
-                          {new Date(subscription.startDate).toLocaleDateString()}
-                        </p>
-                        {subscription.endDate && (
-                          <p>
-                            <span className="font-medium">End Date:</span>{" "}
-                            {new Date(subscription.endDate).toLocaleDateString()}
-                          </p>
-                        )}
-                        <p>
-                          <span className="font-medium">Due Date:</span>{" "}
-                          {new Date(subscription.dueDate).toLocaleDateString()}
-                        </p>
-                        {subscription.stripeSubscriptionId && (
-                          <p className="text-xs text-gray-400 mt-2">
-                            Stripe: {subscription.stripeSubscriptionId}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-

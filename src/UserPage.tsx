@@ -410,12 +410,6 @@ export default function UserPage() {
                 )}
               </div>
             )}
-
-            <DialogFooter>
-              <Button variant="outline" onClick={handleCloseDialog}>
-                Close
-              </Button>
-            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
