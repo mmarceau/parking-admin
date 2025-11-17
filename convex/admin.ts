@@ -1,6 +1,6 @@
-import { query, mutation, internalAction } from "./_generated/server";
+import { query, mutation, internalAction, action } from "./_generated/server";
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
+import { internal, api } from "./_generated/api";
 
 /**
  * Admin: Get all garages
@@ -16,6 +16,55 @@ export const getAllGarages = query({
         const subscriptions = await ctx.db
           .query("subscriptions")
           .filter((q) => q.eq(q.field("garageId"), garage._id))
+          .collect();
+        
+        const activeSubscriptions = subscriptions.filter(s => s.endDate === null);
+        
+        return {
+          ...garage,
+          stats: {
+            totalSubscriptions: subscriptions.length,
+            activeSubscriptions: activeSubscriptions.length,
+          },
+        };
+      })
+    );
+    
+    return garagesWithStats;
+  },
+});
+
+/**
+ * Admin: Get garages by IDs with stats
+ * If returnAll is true, returns all garages (for SuperAdmin)
+ */
+export const getGaragesByIds = query({
+  args: { 
+    garageIds: v.array(v.id("garages")),
+    returnAll: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { garageIds, returnAll }) => {
+    // If returnAll is true (SuperAdmin), fetch all garages
+    let garages;
+    if (returnAll) {
+      garages = await ctx.db.query("garages").collect();
+    } else {
+      // Fetch all specified garages
+      const fetchedGarages = await Promise.all(
+        garageIds.map(async (garageId) => {
+          return await ctx.db.get(garageId);
+        })
+      );
+      // Filter out null values (in case any garage was deleted)
+      garages = fetchedGarages.filter((g) => g !== null);
+    }
+    
+    // Get subscription counts for each garage
+    const garagesWithStats = await Promise.all(
+      garages.map(async (garage) => {
+        const subscriptions = await ctx.db
+          .query("subscriptions")
+          .filter((q) => q.eq(q.field("garageId"), garage!._id))
           .collect();
         
         const activeSubscriptions = subscriptions.filter(s => s.endDate === null);
@@ -55,6 +104,44 @@ export const getAllUsers = query({
           .filter((q) => q.eq(q.field("userId"), user._id))
           .collect();
         
+        // Get full role details with garage names
+        const rolesWithDetails = await Promise.all(
+          userRoles.map(async (userRole) => {
+            const role = await ctx.db.get(userRole.roleId);
+            // SuperAdmin roles have null garageId
+            const garage = userRole.garageId ? await ctx.db.get(userRole.garageId) : null;
+            return {
+              roleName: role?.name || "Unknown",
+              garageName: garage?.name || "System-wide",
+            };
+          })
+        );
+        
+        // Get unique garages from both roles and subscriptions
+        // Filter out null garageIds (SuperAdmin roles)
+        const garageIdsFromRoles = userRoles
+          .filter(ur => ur.garageId !== null)
+          .map(ur => ur.garageId!);
+        const garageIdsFromSubs = subscriptions.map(sub => sub.garageId);
+        const allGarageIds = [...garageIdsFromRoles, ...garageIdsFromSubs];
+        const uniqueGarageIds = Array.from(new Set(allGarageIds.map(id => id.toString()))).map(idStr => {
+          const found = allGarageIds.find(id => id.toString() === idStr);
+          return found!;
+        });
+        
+        const garages = await Promise.all(
+          uniqueGarageIds.map(async (garageId) => {
+            const garage = await ctx.db.get(garageId);
+            if (!garage) return null;
+            return { _id: garage._id, name: garage.name };
+          })
+        );
+        
+        const validGarages = garages.filter((g): g is { _id: any; name: string } => g !== null);
+        
+        // Check if user is SuperAdmin
+        const isSuperAdmin = rolesWithDetails.some(r => r.roleName === "SuperAdmin");
+        
         return {
           ...user,
           stats: {
@@ -62,39 +149,14 @@ export const getAllUsers = query({
             activeSubscriptions: subscriptions.filter(s => s.endDate === null).length,
             roles: userRoles.length,
           },
+          roles: rolesWithDetails,
+          garages: validGarages,
+          isSuperAdmin,
         };
       })
     );
     
     return usersWithStats;
-  },
-});
-
-/**
- * Admin: Get all subscriptions with details
- */
-export const getAllSubscriptions = query({
-  args: {},
-  handler: async (ctx) => {
-    const subscriptions = await ctx.db.query("subscriptions").collect();
-    
-    // Get user, garage, and product details for each subscription
-    const subscriptionsWithDetails = await Promise.all(
-      subscriptions.map(async (subscription) => {
-        const user = await ctx.db.get(subscription.userId);
-        const garage = await ctx.db.get(subscription.garageId);
-        const product = await ctx.db.get(subscription.productId);
-        
-        return {
-          subscription,
-          user,
-          garage,
-          product,
-        };
-      })
-    );
-    
-    return subscriptionsWithDetails;
   },
 });
 
@@ -166,53 +228,6 @@ export const getAllRoles = query({
     );
     
     return rolesWithCounts;
-  },
-});
-
-/**
- * Admin: Get dashboard overview
- */
-export const getDashboardOverview = query({
-  args: {},
-  handler: async (ctx) => {
-    const [garages, users, products, subscriptions, userRoles, productPrices] = await Promise.all([
-      ctx.db.query("garages").collect(),
-      ctx.db.query("users").collect(),
-      ctx.db.query("products").collect(),
-      ctx.db.query("subscriptions").collect(),
-      ctx.db.query("userRoles").collect(),
-      ctx.db.query("productPrices").collect(),
-    ]);
-    
-    const activeSubscriptions = subscriptions.filter(s => s.endDate === null);
-    const expiredSubscriptions = subscriptions.filter(s => s.endDate !== null);
-    
-    // Get revenue potential (sum of active subscription seats)
-    const totalActiveSeats = activeSubscriptions.reduce((sum, s) => sum + s.seats, 0);
-    
-    return {
-      counts: {
-        garages: garages.length,
-        users: users.length,
-        products: products.length,
-        subscriptions: subscriptions.length,
-        roles: userRoles.length,
-        productPrices: productPrices.length,
-      },
-      businessMetrics: {
-        activeSubscriptions: activeSubscriptions.length,
-        expiredSubscriptions: expiredSubscriptions.length,
-        subscriptionRetentionRate: subscriptions.length > 0
-          ? Math.round((activeSubscriptions.length / subscriptions.length) * 100)
-          : 0,
-        totalSeats: totalActiveSeats,
-        averageSeatsPerSubscription: activeSubscriptions.length > 0
-          ? Math.round(totalActiveSeats / activeSubscriptions.length)
-          : 0,
-        activeProducts: products.filter(p => p.isActive).length,
-        inactiveProducts: products.filter(p => !p.isActive).length,
-      },
-    };
   },
 });
 
@@ -599,6 +614,38 @@ export const getGarageSubscriptionsWithDetails = query({
 });
 
 /**
+ * Admin: Get user subscriptions with full details across all garages
+ */
+export const getUserSubscriptionsWithDetails = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const subscriptions = await ctx.db
+      .query("subscriptions")
+      .filter((q) => q.eq(q.field("userId"), userId))
+      .collect();
+    
+    const subscriptionsWithDetails = await Promise.all(
+      subscriptions.map(async (subscription) => {
+        const [user, product, garage] = await Promise.all([
+          ctx.db.get(subscription.userId),
+          ctx.db.get(subscription.productId),
+          ctx.db.get(subscription.garageId),
+        ]);
+        
+        return {
+          ...subscription,
+          user,
+          product,
+          garage,
+        };
+      })
+    );
+    
+    return subscriptionsWithDetails;
+  },
+});
+
+/**
  * Admin: Create a new subscription
  */
 export const createSubscription = mutation({
@@ -681,6 +728,73 @@ export const deleteSubscription = mutation({
     }
     
     await ctx.db.delete(subscriptionId);
+    return subscriptionId;
+  },
+});
+
+/**
+ * Admin: Get a single subscription by ID
+ */
+export const getSubscriptionById = query({
+  args: { subscriptionId: v.id("subscriptions") },
+  handler: async (ctx, { subscriptionId }) => {
+    return await ctx.db.get(subscriptionId);
+  },
+});
+
+/**
+ * Admin: Update subscription end date (internal helper for cancellation)
+ */
+export const updateSubscriptionEndDate = mutation({
+  args: {
+    subscriptionId: v.id("subscriptions"),
+    endDate: v.string(),
+  },
+  handler: async (ctx, { subscriptionId, endDate }) => {
+    const subscription = await ctx.db.get(subscriptionId);
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+    
+    await ctx.db.patch(subscriptionId, {
+      endDate,
+      updatedAt: new Date().toISOString(),
+    });
+    
+    return subscriptionId;
+  },
+});
+
+/**
+ * Admin: Cancel a subscription (cancels in Stripe first, then updates database)
+ */
+export const cancelSubscription = action({
+  args: { subscriptionId: v.id("subscriptions") },
+  handler: async (ctx, { subscriptionId }) => {
+    // Get subscription from database
+    const subscription = await ctx.runQuery(api.admin.getSubscriptionById, { subscriptionId });
+    
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+    
+    // If subscription has a Stripe ID, cancel it in Stripe first
+    if (subscription.stripeSubscriptionId) {
+      const result = await ctx.runAction(api.stripe.cancelStripeSubscription, {
+        stripeSubscriptionId: subscription.stripeSubscriptionId,
+      });
+      
+      if (!result.success) {
+        throw new Error(`Failed to cancel subscription in Stripe: ${result.error}`);
+      }
+    }
+    
+    // Only update database after successful Stripe cancellation
+    await ctx.runMutation(api.admin.updateSubscriptionEndDate, {
+      subscriptionId,
+      endDate: new Date().toISOString(),
+    });
+    
     return subscriptionId;
   },
 });
@@ -851,4 +965,3 @@ export const patchProductPriceStripeId = mutation({
     });
   },
 });
-

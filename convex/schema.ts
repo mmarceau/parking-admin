@@ -70,7 +70,7 @@ export default defineSchema({
 
   userRoles: defineTable({
     userId: v.id("users"),
-    garageId: v.id("garages"),
+    garageId: v.union(v.id("garages"), v.null()),
     roleId: v.id("roles"),
     createdAt: v.string(),
     updatedAt: v.string(),

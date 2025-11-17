@@ -33,10 +33,14 @@ export const seedUsers = mutation({
     const now = new Date().toISOString();
 
     for (let i = 0; i < 15; i++) {
+      const firstName = faker.person.firstName();
+      const lastName = faker.person.lastName();
+      const email = faker.internet.email({ firstName, lastName }).toLowerCase();
+      
       const userId = await ctx.db.insert("users", {
-        firstName: faker.person.firstName(),
-        lastName: faker.person.lastName(),
-        email: faker.internet.email().toLowerCase(),
+        firstName,
+        lastName,
+        email,
         phone: faker.phone.number(),
         stripeUserId: faker.datatype.boolean(0.7) ? `cus_${faker.string.alphanumeric(14)}` : null,
         createdAt: now,
@@ -126,11 +130,12 @@ export const seedProducts = mutation({
       
       for (let config of selectedConfigs) {
         const isActive = faker.datatype.boolean(0.9); // 90% active
+        const randomSeats = faker.number.int({ min: 80, max: 200 });
         const productId = await ctx.db.insert("products", {
           name: config.name,
           isActive: isActive,
           type: config.type,
-          availableSeats: config.seats,
+          availableSeats: randomSeats,
           stripeProductId: isActive ? `prod_${faker.string.alphanumeric(14)}` : null,
           garageId: garage._id,
           createdAt: now,
@@ -404,7 +409,7 @@ export const insertRole = mutation({
 export const insertUserRole = mutation({
   args: {
     userId: v.id("users"),
-    garageId: v.id("garages"),
+    garageId: v.union(v.id("garages"), v.null()),
     roleId: v.id("roles"),
     createdAt: v.string(),
     updatedAt: v.string(),
@@ -470,6 +475,7 @@ export const seedAll = action({
       
       for (let config of selectedConfigs) {
         const isActive = faker.datatype.boolean(0.9);
+        const randomSeats = faker.number.int({ min: 80, max: 200 });
         
         // Create product in Stripe first
         let stripeProductId = null;
@@ -482,7 +488,7 @@ export const seedAll = action({
               garageId: garage._id,
               garageName: garage.name,
               productType: config.type,
-              seats: config.seats.toString(),
+              seats: randomSeats.toString(),
             },
           });
           stripeProductId = stripeProduct.id;
@@ -497,7 +503,7 @@ export const seedAll = action({
           name: config.name,
           isActive: isActive,
           type: config.type,
-          availableSeats: config.seats,
+          availableSeats: randomSeats,
           stripeProductId: stripeProductId,
           garageId: garage._id,
           createdAt: now,
@@ -510,7 +516,7 @@ export const seedAll = action({
 
     // 4. Seed Roles
     console.log("Seeding roles...");
-    const roleNames = ["Admin", "Manager", "Attendant", "Customer", "Supervisor", "Billing"];
+    const roleNames = ["SuperAdmin", "Admin", "Manager", "Attendant", "Customer", "Supervisor", "Billing"];
     for (let roleName of roleNames) {
       await ctx.runMutation(api.seed.insertRole, {
         name: roleName,
@@ -605,9 +611,24 @@ export const seedAll = action({
 
     // 7. Seed User Roles
     console.log("Seeding user roles...");
+    const superAdminRole = roles.find(r => r.name === "SuperAdmin");
     const customerRole = roles.find(r => r.name === "Customer");
     const managerRole = roles.find(r => r.name === "Manager");
     const attendantRole = roles.find(r => r.name === "Attendant");
+
+    // Create at least one SuperAdmin user (assign first user)
+    // SuperAdmin is not associated with a specific garage
+    if (users.length > 0 && superAdminRole) {
+      await ctx.runMutation(api.seed.insertUserRole, {
+        userId: users[0]._id,
+        garageId: null,
+        roleId: superAdminRole._id,
+        createdAt: now,
+        updatedAt: now,
+      });
+      results.userRoles++;
+      console.log(`✓ Created SuperAdmin user: ${users[0].firstName} ${users[0].lastName}`);
+    }
 
     for (let user of users) {
       const numRoles = faker.number.int({ min: 1, max: 2 });
