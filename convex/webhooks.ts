@@ -86,6 +86,7 @@ export const handleStripeWebhook = internalAction({
         // Payment events
         case "payment_intent.succeeded":
           console.log(`  → Payment succeeded: ${data.id} - $${data.amount / 100}`);
+          await handlePaymentIntentSucceeded(ctx, data);
           break;
           
         case "payment_intent.payment_failed":
@@ -99,9 +100,20 @@ export const handleStripeWebhook = internalAction({
           await handleInvoicePaymentFailed(ctx, data);
           break;
         
+        case "invoice.payment_action_required":
+          console.log(`  ⏳ Invoice payment action required: ${data.id}`);
+          await handlePaymentActionRequired(ctx, data);
+          break;
+        
         case "checkout.session.async_payment_failed":
           console.log(`  ⚠ Checkout async payment failed: ${data.id}`);
           await handleCheckoutPaymentFailed(ctx, data);
+          break;
+        
+        // Refund events
+        case "charge.refunded":
+          console.log(`  💰 Charge refunded: ${data.id}`);
+          await handleChargeRefunded(ctx, data);
           break;
         
         default:
@@ -345,10 +357,37 @@ async function handleCheckoutPaymentFailed(ctx: any, data: any) {
   // No database updates needed since subscription was never created
 }
 
+async function handlePaymentIntentSucceeded(ctx: any, data: any) {
+  const { api } = await import("./_generated/api");
+  
+  // Extract payment intent details
+  const paymentIntentId = data.id;
+  const amount = data.amount;
+  const subscriptionStripeId = data.invoice?.subscription || null;
+  
+  console.log(`  → Payment succeeded: $${amount / 100}`);
+  console.log(`  → Payment Intent: ${paymentIntentId}`);
+  
+  // Find subscription if this payment is linked to one
+  if (subscriptionStripeId) {
+    const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+      stripeSubscriptionId: subscriptionStripeId,
+    });
+    
+    if (subscriptions.length > 0) {
+      console.log(`  → Linked to subscription: ${subscriptions[0]._id}`);
+    }
+  }
+}
+
 async function handlePaymentIntentFailed(ctx: any, data: any) {
+  const { api } = await import("./_generated/api");
+  
+  const paymentIntentId = data.id;
   const failureCode = data.last_payment_error?.code;
   const failureMessage = data.last_payment_error?.message;
   const amount = data.amount;
+  const subscriptionStripeId = data.invoice?.subscription || null;
   
   console.log(`  → Payment intent failed`);
   console.log(`  → Amount: $${amount / 100}`);
@@ -362,8 +401,52 @@ async function handlePaymentIntentFailed(ctx: any, data: any) {
   // - incorrect_cvc
   // - processing_error
   
-  // Log for analytics/debugging
-  // Customer will receive error during checkout flow
+  // Find subscription if this payment is linked to one
+  if (subscriptionStripeId) {
+    const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+      stripeSubscriptionId: subscriptionStripeId,
+    });
+    
+    if (subscriptions.length > 0) {
+      console.log(`  → Linked to subscription: ${subscriptions[0]._id}`);
+    }
+  }
+}
+
+async function handlePaymentActionRequired(ctx: any, data: any) {
+  const { api } = await import("./_generated/api");
+  
+  // Extract invoice details
+  const paymentIntentId = data.payment_intent;
+  const amountDue = data.amount_due;
+  const subscriptionStripeId = data.subscription;
+  
+  console.log(`  → Payment action required (ACH or delayed payment method)`);
+  console.log(`  → Amount: $${amountDue / 100}`);
+  console.log(`  → Payment Intent: ${paymentIntentId}`);
+  
+  // Find subscription
+  if (subscriptionStripeId) {
+    const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+      stripeSubscriptionId: subscriptionStripeId,
+    });
+    
+    if (subscriptions.length > 0) {
+      console.log(`  → Linked to subscription: ${subscriptions[0]._id}`);
+    }
+  }
+  
+  console.log(`  → Payment pending, will update when payment clears`);
+}
+
+async function handleChargeRefunded(ctx: any, data: any) {
+  // Extract refund details
+  const paymentIntentId = data.payment_intent;
+  const amountRefunded = data.amount_refunded;
+  
+  console.log(`  → Charge refunded`);
+  console.log(`  → Amount refunded: $${amountRefunded / 100}`);
+  console.log(`  → Payment Intent: ${paymentIntentId}`);
 }
 
 // ========================================

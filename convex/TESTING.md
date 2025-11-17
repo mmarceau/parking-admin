@@ -28,7 +28,6 @@ This will create:
 - 10-30 Invoices (1-3 per user)
 - Multiple Invoice Items per invoice
 - 10-20 Subscriptions (1-2 per user)
-- Multiple Transactions
 - Multiple User Role assignments
 
 ### Seed Individual Tables
@@ -59,9 +58,6 @@ npx convex run seed:seedInvoiceItems
 
 # Seed subscriptions (requires users and passes first)
 npx convex run seed:seedSubscriptions
-
-# Seed transactions (requires invoices and subscriptions first)
-npx convex run seed:seedTransactions
 
 # Seed user roles (requires users, garages, and roles first)
 npx convex run seed:seedUserRoles

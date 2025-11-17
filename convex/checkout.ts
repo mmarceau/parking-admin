@@ -70,7 +70,7 @@ export const createCheckoutSession = action({
       
       // Create the checkout session
       const session: Stripe.Checkout.Session = await stripe.checkout.sessions.create({
-        mode: product.type === "monthly" || product.type === "annual" ? "subscription" : "payment",
+        mode: product.type === "monthly" || product.type === "annual" || product.type === "weekly" ? "subscription" : "payment",
         line_items: [
           {
             price: price.stripePriceId,

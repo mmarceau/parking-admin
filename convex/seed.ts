@@ -1,5 +1,26 @@
-import { mutation } from "./_generated/server";
+import { mutation, action } from "./_generated/server";
+import { v } from "convex/values";
 import { faker } from "@faker-js/faker";
+import Stripe from "stripe";
+
+/**
+ * Get Stripe client instance
+ * Note: The STRIPE_SECRET_KEY must be set in your Convex environment variables
+ */
+function getStripeClient() {
+  const apiKey = process.env.STRIPE_SECRET_KEY;
+  
+  if (!apiKey) {
+    throw new Error(
+      "STRIPE_SECRET_KEY is not set. Please add it to your Convex environment variables. " +
+      "Run: npx convex env set STRIPE_SECRET_KEY sk_test_..."
+    );
+  }
+  
+  return new Stripe(apiKey, {
+    apiVersion: "2025-10-29.clover",
+  });
+}
 
 /**
  * Seed Users
@@ -186,10 +207,11 @@ export const seedProductPrices = mutation({
 
       for (let i = 0; i < numPrices; i++) {
         const tier = priceTiers[i];
-        const baseAmount = product.type === "monthly" ? 100 : 
-                          product.type === "weekly" ? 40 : 
-                          product.type === "daily" ? 15 :
-                          product.type === "annual" ? 1000 : 50;
+        // Base amounts in CENTS (not dollars)
+        const baseAmount = product.type === "monthly" ? 15000 : 
+                          product.type === "weekly" ? 5000 : 
+                          product.type === "daily" ? 2000 :
+                          product.type === "annual" ? 150000 : 7500;
         
         const priceId = await ctx.db.insert("productPrices", {
           productId: product._id,
@@ -348,12 +370,143 @@ export const seedUserRoles = mutation({
 });
 
 /**
- * Seed All Data
- * Seeds all tables in the correct order to maintain relationships
+ * Internal helper queries for seedAll action
  */
-export const seedAll = mutation({
+import { query } from "./_generated/server";
+
+export const getAllGarages = query({
   args: {},
   handler: async (ctx) => {
+    return await ctx.db.query("garages").collect();
+  },
+});
+
+export const getAllProducts = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("products").collect();
+  },
+});
+
+export const getAllUsers = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("users").collect();
+  },
+});
+
+export const getAllRoles = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("roles").collect();
+  },
+});
+
+/**
+ * Internal helper mutation to insert a product
+ * Used by seedAll action
+ */
+export const insertProduct = mutation({
+  args: {
+    name: v.string(),
+    isActive: v.boolean(),
+    type: v.string(),
+    availableSeats: v.number(),
+    stripeProductId: v.union(v.string(), v.null()),
+    garageId: v.id("garages"),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("products", args);
+  },
+});
+
+/**
+ * Internal helper mutation to insert a product price
+ * Used by seedAll action
+ */
+export const insertProductPrice = mutation({
+  args: {
+    productId: v.id("products"),
+    isActive: v.boolean(),
+    name: v.string(),
+    amount: v.number(),
+    stripePriceId: v.union(v.string(), v.null()),
+    isPublic: v.boolean(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("productPrices", args);
+  },
+});
+
+/**
+ * Internal helper mutation to insert a role
+ * Used by seedAll action
+ */
+export const insertRole = mutation({
+  args: {
+    name: v.string(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("roles", args);
+  },
+});
+
+/**
+ * Internal helper mutation to insert a subscription
+ * Used by seedAll action
+ */
+export const insertSubscription = mutation({
+  args: {
+    userId: v.id("users"),
+    garageId: v.id("garages"),
+    productId: v.id("products"),
+    startDate: v.string(),
+    endDate: v.union(v.string(), v.null()),
+    dueDate: v.string(),
+    stripeSubscriptionId: v.string(),
+    seats: v.number(),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("subscriptions", args);
+  },
+});
+
+/**
+ * Internal helper mutation to insert a user role
+ * Used by seedAll action
+ */
+export const insertUserRole = mutation({
+  args: {
+    userId: v.id("users"),
+    garageId: v.id("garages"),
+    roleId: v.id("roles"),
+    createdAt: v.string(),
+    updatedAt: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("userRoles", args);
+  },
+});
+
+/**
+ * Seed All Data
+ * Seeds all tables in the correct order to maintain relationships
+ * Creates real Stripe products and prices
+ */
+export const seedAll = action({
+  args: {},
+  handler: async (ctx) => {
+    // Initialize Stripe client
+    const stripe = getStripeClient();
+    const { api } = await import("./_generated/api");
     const results = {
       users: 0,
       garages: 0,
@@ -368,51 +521,19 @@ export const seedAll = mutation({
 
     // 1. Seed Users
     console.log("Seeding users...");
-    for (let i = 0; i < 15; i++) {
-      await ctx.db.insert("users", {
-        firstName: faker.person.firstName(),
-        lastName: faker.person.lastName(),
-        email: faker.internet.email().toLowerCase(),
-        phone: faker.phone.number(),
-        stripeUserId: faker.datatype.boolean(0.7) ? `cus_${faker.string.alphanumeric(14)}` : null,
-        createdAt: now,
-        updatedAt: now,
-      });
-      results.users++;
-    }
+    const usersResult = await ctx.runMutation(api.seed.seedUsers);
+    results.users = usersResult.count;
+    console.log(`✓ Created ${results.users} users`);
 
     // 2. Seed Garages
     console.log("Seeding garages...");
-    const garageNames = [
-      "Downtown Parking Center",
-      "City Square Garage",
-      "Waterfront Parking",
-      "Airport Long-Term Parking",
-      "Medical Center Garage",
-      "Shopping District Parking",
-      "Convention Center Garage",
-    ];
+    const garagesResult = await ctx.runMutation(api.seed.seedGarages);
+    results.garages = garagesResult.count;
+    console.log(`✓ Created ${results.garages} garages`);
 
-    for (let garageName of garageNames) {
-      await ctx.db.insert("garages", {
-        name: garageName,
-        address1: faker.location.streetAddress(),
-        address2: faker.helpers.arrayElement([
-          faker.location.secondaryAddress(),
-          "",
-        ]),
-        city: faker.location.city(),
-        state: faker.location.state({ abbreviated: true }),
-        postalCode: faker.location.zipCode(),
-        createdAt: now,
-        updatedAt: now,
-      });
-      results.garages++;
-    }
-
-    // 3. Seed Products
+    // 3. Seed Products with Stripe Integration
     console.log("Seeding products...");
-    const allGarages = await ctx.db.query("garages").collect();
+    const allGarages = await ctx.runQuery(api.seed.getAllGarages);
     
     const productConfigs = [
       { name: "Monthly Unlimited", type: "monthly", seats: 1 },
@@ -431,12 +552,35 @@ export const seedAll = mutation({
       
       for (let config of selectedConfigs) {
         const isActive = faker.datatype.boolean(0.9);
-        await ctx.db.insert("products", {
+        
+        // Create product in Stripe first
+        let stripeProductId = null;
+        try {
+          console.log(`Creating Stripe product: ${config.name} for ${garage.name}`);
+          const stripeProduct = await stripe.products.create({
+            name: `${config.name} - ${garage.name}`,
+            description: `${config.type} parking pass at ${garage.name}`,
+            metadata: {
+              garageId: garage._id,
+              garageName: garage.name,
+              productType: config.type,
+              seats: config.seats.toString(),
+            },
+          });
+          stripeProductId = stripeProduct.id;
+          console.log(`✓ Created Stripe product: ${stripeProductId}`);
+        } catch (error: any) {
+          console.error(`Failed to create Stripe product for ${config.name}:`, error.message);
+          throw new Error(`Stripe product creation failed: ${error.message}`);
+        }
+        
+        // Insert product into Convex database
+        await ctx.runMutation(api.seed.insertProduct, {
           name: config.name,
           isActive: isActive,
           type: config.type,
           availableSeats: config.seats,
-          stripeProductId: isActive ? `prod_${faker.string.alphanumeric(14)}` : null,
+          stripeProductId: stripeProductId,
           garageId: garage._id,
           createdAt: now,
           updatedAt: now,
@@ -444,26 +588,28 @@ export const seedAll = mutation({
         results.products++;
       }
     }
+    console.log(`✓ Created ${results.products} products with Stripe integration`);
 
     // 4. Seed Roles
     console.log("Seeding roles...");
     const roleNames = ["Admin", "Manager", "Attendant", "Customer", "Supervisor", "Billing"];
     for (let roleName of roleNames) {
-      await ctx.db.insert("roles", {
+      await ctx.runMutation(api.seed.insertRole, {
         name: roleName,
         createdAt: now,
         updatedAt: now,
       });
       results.roles++;
     }
+    console.log(`✓ Created ${results.roles} roles`);
 
     // Get all created data for relationships
-    const users = await ctx.db.query("users").collect();
-    const garages = await ctx.db.query("garages").collect();
-    const products = await ctx.db.query("products").collect();
-    const roles = await ctx.db.query("roles").collect();
+    const users = await ctx.runQuery(api.seed.getAllUsers);
+    const garages = await ctx.runQuery(api.seed.getAllGarages);
+    const products = await ctx.runQuery(api.seed.getAllProducts);
+    const roles = await ctx.runQuery(api.seed.getAllRoles);
 
-    // 5. Seed Product Prices
+    // 5. Seed Product Prices with Stripe Integration
     console.log("Seeding product prices...");
     for (let product of products) {
       const numPrices = faker.number.int({ min: 2, max: 3 });
@@ -475,17 +621,57 @@ export const seedAll = mutation({
 
       for (let i = 0; i < numPrices; i++) {
         const tier = priceTiers[i];
-        const baseAmount = product.type === "monthly" ? 100 : 
-                          product.type === "weekly" ? 40 : 
-                          product.type === "daily" ? 15 :
-                          product.type === "annual" ? 1000 : 50;
+        // Base amounts in CENTS (not dollars)
+        const baseAmount = product.type === "monthly" ? 15000 : 
+                          product.type === "weekly" ? 5000 : 
+                          product.type === "daily" ? 2000 :
+                          product.type === "annual" ? 150000 : 7500;
         
-        await ctx.db.insert("productPrices", {
+        const amount = baseAmount * (i + 1);
+        const isActive = faker.datatype.boolean(0.85);
+        
+        // Create price in Stripe with recurring intervals
+        let stripePriceId = null;
+        if (product.stripeProductId) {
+          try {
+            console.log(`Creating Stripe price: ${tier.name} for product ${product.name}`);
+            
+            // Determine recurring interval based on product type
+            let recurring = undefined;
+            if (product.type === "monthly") {
+              recurring = { interval: "month" as const, interval_count: 1 };
+            } else if (product.type === "annual") {
+              recurring = { interval: "year" as const, interval_count: 1 };
+            } else if (product.type === "weekly") {
+              recurring = { interval: "week" as const, interval_count: 1 };
+            }
+            // For daily, weekend, and other types, leave recurring undefined (one-time payment)
+            
+            const stripePrice = await stripe.prices.create({
+              product: product.stripeProductId,
+              unit_amount: amount, // Amount is already in cents
+              currency: "usd",
+              recurring: recurring,
+              metadata: {
+                productId: product._id,
+                productName: product.name,
+                priceTier: tier.name,
+              },
+            });
+            stripePriceId = stripePrice.id;
+            console.log(`✓ Created Stripe price: ${stripePriceId} (${recurring ? recurring.interval + 'ly recurring' : 'one-time'})`);
+          } catch (error: any) {
+            console.error(`Failed to create Stripe price for ${product.name}:`, error.message);
+            throw new Error(`Stripe price creation failed: ${error.message}`);
+          }
+        }
+        
+        await ctx.runMutation(api.seed.insertProductPrice, {
           productId: product._id,
-          isActive: faker.datatype.boolean(0.85),
+          isActive: isActive,
           name: tier.name,
-          amount: baseAmount * (i + 1),
-          stripePriceId: product.stripeProductId ? `price_${faker.string.alphanumeric(14)}` : null,
+          amount: amount,
+          stripePriceId: stripePriceId,
           isPublic: tier.isPublic,
           createdAt: now,
           updatedAt: now,
@@ -493,6 +679,7 @@ export const seedAll = mutation({
         results.productPrices++;
       }
     }
+    console.log(`✓ Created ${results.productPrices} product prices with Stripe integration`);
 
     // 6. Seed Subscriptions
     console.log("Seeding subscriptions...");
@@ -522,7 +709,7 @@ export const seedAll = mutation({
         const dueDate = new Date(startDate);
         dueDate.setMonth(dueDate.getMonth() + 1);
 
-        await ctx.db.insert("subscriptions", {
+        await ctx.runMutation(api.seed.insertSubscription, {
           userId: user._id,
           garageId: garage._id,
           productId: product._id,
@@ -537,6 +724,7 @@ export const seedAll = mutation({
         results.subscriptions++;
       }
     }
+    console.log(`✓ Created ${results.subscriptions} subscriptions`);
 
     // 7. Seed User Roles
     console.log("Seeding user roles...");
@@ -562,7 +750,7 @@ export const seedAll = mutation({
           role = faker.helpers.arrayElement(roles);
         }
 
-        await ctx.db.insert("userRoles", {
+        await ctx.runMutation(api.seed.insertUserRole, {
           userId: user._id,
           garageId: garage._id,
           roleId: role._id,
@@ -572,6 +760,7 @@ export const seedAll = mutation({
         results.userRoles++;
       }
     }
+    console.log(`✓ Created ${results.userRoles} user roles`);
 
     return {
       success: true,
