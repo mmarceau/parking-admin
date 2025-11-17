@@ -1,13 +1,37 @@
-import { useState, useEffect } from "react";
-import { useQuery, useAction } from "convex/react";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useAction, useMutation } from "convex/react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Badge } from "./components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog";
 
 type View = "user-selection" | "user-dashboard" | "add-subscription";
+
+type SubscriptionWithDetails = {
+  _id: Id<"subscriptions">;
+  userId: Id<"users">;
+  garageId: Id<"garages">;
+  productId: Id<"products">;
+  startDate: string;
+  endDate: string | null;
+  dueDate: string;
+  stripeSubscriptionId: string;
+  seats: number;
+  createdAt: string;
+  updatedAt: string;
+  garage: any;
+  product: any;
+};
 
 export default function UserPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -15,6 +39,13 @@ export default function UserPage() {
   const [selectedUserId, setSelectedUserId] = useState<Id<"users"> | null>(null);
   const [selectedGarageId, setSelectedGarageId] = useState<Id<"garages"> | null>(null);
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
+  const [selectedSubscription, setSelectedSubscription] = useState<SubscriptionWithDetails | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  
+  // Track if we've shown the checkout message to prevent duplicates
+  const checkoutMessageShown = useRef<string | null>(null);
 
   // Queries
   const users = useQuery(api.user.getAllUsers);
@@ -30,6 +61,10 @@ export default function UserPage() {
 
   // Actions
   const createCheckoutSession = useAction(api.checkout.createCheckoutSession);
+  const cancelStripeSubscription = useAction(api.stripe.cancelStripeSubscription);
+  
+  // Mutations
+  const cancelSubscription = useMutation(api.user.cancelSubscription);
 
   // Handle URL parameters on mount and when they change
   useEffect(() => {
@@ -43,13 +78,22 @@ export default function UserPage() {
       
       // Handle checkout success/cancel
       if (checkout === "success" && sessionId) {
-        alert("🎉 Payment successful! Your subscription is now active.");
-        // Clean up URL params
-        setSearchParams({ userId });
+        // Only show the message once per session ID
+        if (checkoutMessageShown.current !== sessionId) {
+          checkoutMessageShown.current = sessionId;
+          alert("🎉 Payment successful! Your subscription is now active.");
+          // Clean up URL params
+          setSearchParams({ userId });
+        }
       } else if (checkout === "cancelled") {
-        alert("Payment was cancelled. You can try again anytime.");
-        // Clean up URL params
-        setSearchParams({ userId });
+        // Only show the message once per URL state
+        const cancelKey = `cancelled_${userId}`;
+        if (checkoutMessageShown.current !== cancelKey) {
+          checkoutMessageShown.current = cancelKey;
+          alert("Payment was cancelled. You can try again anytime.");
+          // Clean up URL params
+          setSearchParams({ userId });
+        }
       }
     }
   }, [searchParams, setSearchParams]);
@@ -113,6 +157,45 @@ export default function UserPage() {
       console.error("Checkout error:", error);
       alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
       setIsProcessingCheckout(false);
+    }
+  };
+
+  const handleSubscriptionClick = (subscription: SubscriptionWithDetails) => {
+    setSelectedSubscription(subscription);
+    setIsDetailsDialogOpen(true);
+    setShowCancelConfirm(false);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDetailsDialogOpen(false);
+    setSelectedSubscription(null);
+    setShowCancelConfirm(false);
+  };
+
+  const handleCancelSubscription = async () => {
+    if (!selectedSubscription) return;
+
+    setIsCancelling(true);
+    try {
+      // Cancel in Stripe first
+      const stripeResult = await cancelStripeSubscription({
+        stripeSubscriptionId: selectedSubscription.stripeSubscriptionId,
+      });
+
+      if (!stripeResult.success) {
+        throw new Error(stripeResult.error || "Failed to cancel subscription in Stripe");
+      }
+
+      // Then update in our database
+      await cancelSubscription({ subscriptionId: selectedSubscription._id });
+
+      alert("✅ Subscription cancelled successfully");
+      handleCloseDialog();
+    } catch (error) {
+      console.error("Cancellation error:", error);
+      alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -190,9 +273,10 @@ export default function UserPage() {
               ) : (
                 <div className="space-y-2">
                   {userSubscriptions.map((sub) => (
-                    <div
+                    <button
                       key={sub._id}
-                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                      onClick={() => handleSubscriptionClick(sub)}
+                      className="w-full flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer text-left"
                     >
                       <div>
                         <div className="font-medium text-lg">
@@ -206,7 +290,7 @@ export default function UserPage() {
                       <Badge variant={sub.endDate ? "secondary" : "default"}>
                         {sub.endDate ? "Expired" : "Active"}
                       </Badge>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -219,6 +303,121 @@ export default function UserPage() {
             </Button>
           </div>
         </div>
+        
+        {/* Subscription Details Dialog */}
+        <Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Subscription Details</DialogTitle>
+              <DialogDescription>
+                View and manage your subscription
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedSubscription && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Product</label>
+                    <p className="text-base font-medium">{selectedSubscription.product?.name}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Garage</label>
+                    <p className="text-base font-medium">{selectedSubscription.garage?.name}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Status</label>
+                    <div className="mt-1">
+                      <Badge variant={selectedSubscription.endDate ? "secondary" : "default"}>
+                        {selectedSubscription.endDate ? "Cancelled" : "Active"}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Seats</label>
+                    <p className="text-base font-medium">{selectedSubscription.seats}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Start Date</label>
+                    <p className="text-base">
+                      {new Date(selectedSubscription.startDate).toLocaleDateString()}
+                    </p>
+                  </div>
+                  {selectedSubscription.endDate && (
+                    <div>
+                      <label className="text-sm font-medium text-gray-500">End Date</label>
+                      <p className="text-base">
+                        {new Date(selectedSubscription.endDate).toLocaleDateString()}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Stripe Subscription ID</label>
+                  <p className="text-base font-mono text-sm bg-gray-100 p-2 rounded mt-1">
+                    {selectedSubscription.stripeSubscriptionId}
+                  </p>
+                </div>
+
+                {!selectedSubscription.endDate && (
+                  <div className="pt-4 border-t">
+                    {!showCancelConfirm ? (
+                      <Button
+                        variant="destructive"
+                        onClick={() => setShowCancelConfirm(true)}
+                        className="w-full"
+                      >
+                        Cancel Subscription
+                      </Button>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                          <p className="text-sm text-amber-800 font-medium">
+                            Are you sure you want to cancel this subscription?
+                          </p>
+                          <p className="text-sm text-amber-700 mt-1">
+                            This action cannot be undone.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="destructive"
+                            onClick={handleCancelSubscription}
+                            disabled={isCancelling}
+                            className="flex-1"
+                          >
+                            {isCancelling ? "Cancelling..." : "Yes, Cancel Subscription"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => setShowCancelConfirm(false)}
+                            disabled={isCancelling}
+                            className="flex-1"
+                          >
+                            No, Keep It
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleCloseDialog}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

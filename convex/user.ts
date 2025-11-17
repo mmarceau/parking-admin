@@ -118,8 +118,6 @@ export const subscribe = mutation({
     // Create subscription
     const now = new Date().toISOString();
     const startDate = new Date();
-    const dueDate = new Date(startDate);
-    dueDate.setMonth(dueDate.getMonth() + 1); // Due in 1 month
     
     const subscriptionId = await ctx.db.insert("subscriptions", {
       userId,
@@ -127,7 +125,6 @@ export const subscribe = mutation({
       productId,
       startDate: startDate.toISOString(),
       endDate: null,
-      dueDate: dueDate.toISOString(),
       stripeSubscriptionId: `demo_${Date.now()}`, // Demo stripe ID
       seats,
       createdAt: now,
@@ -166,6 +163,36 @@ export const getUserSubscriptions = query({
     );
     
     return subscriptionsWithDetails;
+  },
+});
+
+/**
+ * User: Cancel a subscription
+ */
+export const cancelSubscription = mutation({
+  args: {
+    subscriptionId: v.id("subscriptions"),
+  },
+  handler: async (ctx, { subscriptionId }) => {
+    // Get the subscription
+    const subscription = await ctx.db.get(subscriptionId);
+    if (!subscription) {
+      throw new Error("Subscription not found");
+    }
+    
+    // Check if subscription is already cancelled
+    if (subscription.endDate) {
+      throw new Error("Subscription is already cancelled");
+    }
+    
+    // Update the subscription with current date as endDate
+    const now = new Date().toISOString();
+    await ctx.db.patch(subscriptionId, {
+      endDate: now,
+      updatedAt: now,
+    });
+    
+    return { success: true };
   },
 });
 

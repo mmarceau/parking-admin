@@ -290,3 +290,34 @@ export const getStripePrice = action({
   },
 });
 
+/**
+ * Cancel a subscription in Stripe
+ */
+export const cancelStripeSubscription = action({
+  args: {
+    stripeSubscriptionId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const stripe = getStripeClient();
+    
+    try {
+      const subscription = await stripe.subscriptions.cancel(args.stripeSubscriptionId);
+      
+      return {
+        success: true,
+        subscription: {
+          id: subscription.id,
+          status: subscription.status,
+          canceled_at: subscription.canceled_at,
+        },
+      };
+    } catch (error: any) {
+      console.error("Stripe subscription cancellation failed:", error);
+      return {
+        success: false,
+        error: error.message || "Failed to cancel Stripe subscription",
+      };
+    }
+  },
+});
+

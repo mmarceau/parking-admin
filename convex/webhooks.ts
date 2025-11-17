@@ -8,6 +8,7 @@
 import { internalAction, internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { Id } from "./_generated/dataModel";
 
 /**
  * Main webhook event handler
@@ -30,41 +31,15 @@ export const handleStripeWebhook = internalAction({
       // Handle different event types
       switch (args.eventType) {
         // Product events
-        case "product.created":
-          console.log(`  → Product created in Stripe: ${data.id}`);
-          await handleProductCreated(ctx, data);
-          break;
-          
         case "product.updated":
           console.log(`  → Product updated in Stripe: ${data.id}`);
           await handleProductUpdated(ctx, data);
           break;
-          
-        case "product.deleted":
-          console.log(`  → Product deleted in Stripe: ${data.id}`);
-          await handleProductDeleted(ctx, data);
-          break;
         
         // Price events
-        case "price.created":
-          console.log(`  → Price created in Stripe: ${data.id}`);
-          await handlePriceCreated(ctx, data);
-          break;
-          
         case "price.updated":
           console.log(`  → Price updated in Stripe: ${data.id}`);
           await handlePriceUpdated(ctx, data);
-          break;
-        
-        // Checkout events
-        case "checkout.session.completed":
-          console.log(`  → Checkout completed: ${data.id}`);
-          await handleCheckoutCompleted(ctx, data);
-          break;
-          
-        case "checkout.session.async_payment_succeeded":
-          console.log(`  → Checkout async payment succeeded: ${data.id}`);
-          await handleCheckoutCompleted(ctx, data);
           break;
         
         // Subscription events
@@ -83,37 +58,10 @@ export const handleStripeWebhook = internalAction({
           await handleSubscriptionDeleted(ctx, data);
           break;
         
-        // Payment events
-        case "payment_intent.succeeded":
-          console.log(`  → Payment succeeded: ${data.id} - $${data.amount / 100}`);
-          await handlePaymentIntentSucceeded(ctx, data);
-          break;
-          
-        case "payment_intent.payment_failed":
-          console.log(`  ⚠ Payment intent failed: ${data.id}`);
-          await handlePaymentIntentFailed(ctx, data);
-          break;
-        
         // Invoice payment events
         case "invoice.payment_failed":
           console.log(`  ⚠ Invoice payment failed: ${data.id}`);
           await handleInvoicePaymentFailed(ctx, data);
-          break;
-        
-        case "invoice.payment_action_required":
-          console.log(`  ⏳ Invoice payment action required: ${data.id}`);
-          await handlePaymentActionRequired(ctx, data);
-          break;
-        
-        case "checkout.session.async_payment_failed":
-          console.log(`  ⚠ Checkout async payment failed: ${data.id}`);
-          await handleCheckoutPaymentFailed(ctx, data);
-          break;
-        
-        // Refund events
-        case "charge.refunded":
-          console.log(`  💰 Charge refunded: ${data.id}`);
-          await handleChargeRefunded(ctx, data);
           break;
         
         default:
@@ -131,24 +79,6 @@ export const handleStripeWebhook = internalAction({
 // ========================================
 // Product Event Handlers
 // ========================================
-
-async function handleProductCreated(ctx: any, data: any) {
-  const { api } = await import("./_generated/api");
-  
-  // Check if product already exists in our database
-  const existingProducts = await ctx.runQuery(api.webhooks.findProductByStripeId, {
-    stripeProductId: data.id,
-  });
-  
-  if (existingProducts.length > 0) {
-    console.log(`  ℹ Product already exists in database, skipping creation`);
-    return;
-  }
-  
-  // If the product has metadata with a garageId, we could auto-create it
-  // For now, just log that a new product was created in Stripe
-  console.log(`  ℹ New product created in Stripe (manual sync may be needed)`);
-}
 
 async function handleProductUpdated(ctx: any, data: any) {
   const { api } = await import("./_generated/api");
@@ -174,29 +104,9 @@ async function handleProductUpdated(ctx: any, data: any) {
   console.log(`  ✓ Updated product ${product._id} from Stripe`);
 }
 
-async function handleProductDeleted(ctx: any, data: any) {
-  console.log(`  ℹ Product ${data.id} deleted in Stripe`);
-  // You might want to mark it as inactive rather than delete
-}
-
 // ========================================
 // Price Event Handlers
 // ========================================
-
-async function handlePriceCreated(ctx: any, data: any) {
-  const { api } = await import("./_generated/api");
-  
-  const existingPrices = await ctx.runQuery(api.webhooks.findPriceByStripeId, {
-    stripePriceId: data.id,
-  });
-  
-  if (existingPrices.length > 0) {
-    console.log(`  ℹ Price already exists in database, skipping creation`);
-    return;
-  }
-  
-  console.log(`  ℹ New price created in Stripe (manual sync may be needed)`);
-}
 
 async function handlePriceUpdated(ctx: any, data: any) {
   const { api } = await import("./_generated/api");
@@ -222,77 +132,139 @@ async function handlePriceUpdated(ctx: any, data: any) {
 }
 
 // ========================================
-// Checkout Event Handlers
-// ========================================
-
-async function handleCheckoutCompleted(ctx: any, data: any) {
-  // Extract metadata from checkout session
-  const metadata = data.metadata;
-  
-  if (!metadata || !metadata.userId || !metadata.garageId || !metadata.productId || !metadata.priceId) {
-    console.log(`  ⚠ Checkout session missing required metadata`);
-    return;
-  }
-  
-  try {
-    // Create subscription in database
-    const now = new Date().toISOString();
-    const startDate = new Date();
-    const dueDate = new Date(startDate);
-    
-    // Set due date based on subscription type
-    const productName = metadata.productName?.toLowerCase() || "";
-    if (productName.includes("annual") || productName.includes("yearly")) {
-      dueDate.setFullYear(dueDate.getFullYear() + 1);
-    } else {
-      dueDate.setMonth(dueDate.getMonth() + 1); // Default to monthly
-    }
-    
-    await ctx.runMutation(async (ctx: any) => {
-      await ctx.db.insert("subscriptions", {
-        userId: metadata.userId,
-        garageId: metadata.garageId,
-        productId: metadata.productId,
-        startDate: startDate.toISOString(),
-        endDate: null,
-        dueDate: dueDate.toISOString(),
-        stripeSubscriptionId: data.subscription || data.id, // Use subscription ID or session ID
-        seats: parseInt(metadata.seats || "1"),
-        createdAt: now,
-        updatedAt: now,
-      });
-    });
-    
-    console.log(`  ✓ Created subscription for user ${metadata.userId}`);
-  } catch (error: any) {
-    console.error(`  ⚠ Failed to create subscription: ${error.message}`);
-  }
-}
-
-// ========================================
 // Subscription Event Handlers
 // ========================================
 
 async function handleSubscriptionCreated(ctx: any, data: any) {
   console.log(`  ℹ Subscription created: ${data.id}`);
-  // This is called when a subscription is created in Stripe
-  // If using Stripe subscriptions directly, you might sync here
+  
+  // Extract metadata from the subscription
+  const metadata = data.metadata;
+  
+  if (!metadata || !metadata.userId || !metadata.garageId || !metadata.productId || !metadata.priceId) {
+    console.log(`  ⚠ Subscription missing required metadata`);
+    console.log(`  → Metadata:`, metadata);
+    return;
+  }
+  
+  try {
+    // Check if subscription already exists
+    const { api } = await import("./_generated/api");
+    const existingSubscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+      stripeSubscriptionId: data.id,
+    });
+    
+    if (existingSubscriptions.length > 0) {
+      console.log(`  ℹ Subscription ${data.id} already exists in database, skipping creation`);
+      return;
+    }
+    
+    // Convert Stripe timestamps (seconds) to ISO strings
+    const startDate = new Date(data.current_period_start * 1000).toISOString();
+    
+    // Create subscription in database
+    await ctx.runMutation(internal.webhooks.createSubscription, {
+      userId: metadata.userId as Id<"users">,
+      garageId: metadata.garageId as Id<"garages">,
+      productId: metadata.productId as Id<"products">,
+      startDate: startDate,
+      stripeSubscriptionId: data.id,
+      seats: parseInt(metadata.seats || "1"),
+    });
+    
+    console.log(`  ✓ Created subscription record for user ${metadata.userId}`);
+  } catch (error: any) {
+    console.error(`  ⚠ Failed to create subscription: ${error.message}`);
+    throw error;
+  }
 }
 
 async function handleSubscriptionUpdated(ctx: any, data: any) {
   console.log(`  ℹ Subscription updated: ${data.id}`);
-  // Handle subscription updates (e.g., plan changes, quantity updates)
-  // Find subscription by stripeSubscriptionId and update
+  
+  const { api } = await import("./_generated/api");
+  
+  // Find subscription in database
+  const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+    stripeSubscriptionId: data.id,
+  });
+  
+  if (subscriptions.length === 0) {
+    console.log(`  ⚠ Subscription ${data.id} not found in database`);
+    return;
+  }
+  
+  const subscription = subscriptions[0];
+  
+  try {
+    const updateArgs: any = {
+      subscriptionId: subscription._id,
+    };
+    
+    // Update seats if quantity changed
+    if (data.items?.data?.[0]?.quantity) {
+      updateArgs.seats = data.items.data[0].quantity;
+    }
+    
+    // Check if subscription was cancelled
+    if (data.status === "canceled" || data.cancel_at_period_end) {
+      // If the subscription is set to cancel at period end, don't set endDate yet
+      // Wait for the actual cancellation event
+      if (data.status === "canceled" && !subscription.endDate) {
+        updateArgs.endDate = new Date(data.canceled_at * 1000).toISOString();
+        console.log(`  → Subscription marked as cancelled`);
+      }
+    }
+    
+    // Update the subscription record
+    await ctx.runMutation(internal.webhooks.updateSubscriptionInDb, updateArgs);
+    
+    console.log(`  ✓ Updated subscription ${subscription._id}`);
+  } catch (error: any) {
+    console.error(`  ⚠ Failed to update subscription: ${error.message}`);
+    throw error;
+  }
 }
 
 async function handleSubscriptionDeleted(ctx: any, data: any) {
   console.log(`  ℹ Subscription deleted: ${data.id}`);
-  // Handle subscription cancellation
-  // Set endDate on the subscription
+  
+  const { api } = await import("./_generated/api");
+  
+  // Find subscription in database
+  const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+    stripeSubscriptionId: data.id,
+  });
+  
+  if (subscriptions.length === 0) {
+    console.log(`  ⚠ Subscription ${data.id} not found in database`);
+    return;
+  }
+  
+  const subscription = subscriptions[0];
+  
+  // Only update if not already marked as ended
+  if (subscription.endDate === null) {
+    try {
+      const endDate = new Date(data.canceled_at * 1000).toISOString();
+      
+      await ctx.runMutation(internal.webhooks.updateSubscriptionStatus, {
+        subscriptionId: subscription._id,
+        endDate: endDate,
+      });
+      
+      console.log(`  ✓ Subscription cancelled and endDate set to ${endDate}`);
+    } catch (error: any) {
+      console.error(`  ⚠ Failed to update subscription: ${error.message}`);
+      throw error;
+    }
+  } else {
+    console.log(`  ℹ Subscription already marked as ended`);
+  }
 }
 
 // ========================================
-// Payment Failure Handlers
+// Invoice Payment Failure Handler
 // ========================================
 
 async function handleInvoicePaymentFailed(ctx: any, data: any) {
@@ -338,115 +310,6 @@ async function handleInvoicePaymentFailed(ctx: any, data: any) {
     // Subscription remains active during retry period
     // Stripe will automatically retry according to retry schedule
   }
-}
-
-async function handleCheckoutPaymentFailed(ctx: any, data: any) {
-  console.log(`  → Checkout session payment failed`);
-  console.log(`  → Session: ${data.id}`);
-  
-  // Extract metadata from checkout session
-  const metadata = data.metadata;
-  
-  if (metadata) {
-    console.log(`  → User: ${metadata.userId || 'unknown'}`);
-    console.log(`  → Product: ${metadata.productName || 'unknown'}`);
-    console.log(`  → Customer can retry checkout from your app`);
-  }
-  
-  // Customer will need to initiate a new checkout session to retry
-  // No database updates needed since subscription was never created
-}
-
-async function handlePaymentIntentSucceeded(ctx: any, data: any) {
-  const { api } = await import("./_generated/api");
-  
-  // Extract payment intent details
-  const paymentIntentId = data.id;
-  const amount = data.amount;
-  const subscriptionStripeId = data.invoice?.subscription || null;
-  
-  console.log(`  → Payment succeeded: $${amount / 100}`);
-  console.log(`  → Payment Intent: ${paymentIntentId}`);
-  
-  // Find subscription if this payment is linked to one
-  if (subscriptionStripeId) {
-    const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
-      stripeSubscriptionId: subscriptionStripeId,
-    });
-    
-    if (subscriptions.length > 0) {
-      console.log(`  → Linked to subscription: ${subscriptions[0]._id}`);
-    }
-  }
-}
-
-async function handlePaymentIntentFailed(ctx: any, data: any) {
-  const { api } = await import("./_generated/api");
-  
-  const paymentIntentId = data.id;
-  const failureCode = data.last_payment_error?.code;
-  const failureMessage = data.last_payment_error?.message;
-  const amount = data.amount;
-  const subscriptionStripeId = data.invoice?.subscription || null;
-  
-  console.log(`  → Payment intent failed`);
-  console.log(`  → Amount: $${amount / 100}`);
-  console.log(`  → Failure code: ${failureCode || 'unknown'}`);
-  console.log(`  → Message: ${failureMessage || 'No details'}`);
-  
-  // Common failure codes:
-  // - card_declined
-  // - insufficient_funds
-  // - expired_card
-  // - incorrect_cvc
-  // - processing_error
-  
-  // Find subscription if this payment is linked to one
-  if (subscriptionStripeId) {
-    const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
-      stripeSubscriptionId: subscriptionStripeId,
-    });
-    
-    if (subscriptions.length > 0) {
-      console.log(`  → Linked to subscription: ${subscriptions[0]._id}`);
-    }
-  }
-}
-
-async function handlePaymentActionRequired(ctx: any, data: any) {
-  const { api } = await import("./_generated/api");
-  
-  // Extract invoice details
-  const paymentIntentId = data.payment_intent;
-  const amountDue = data.amount_due;
-  const subscriptionStripeId = data.subscription;
-  
-  console.log(`  → Payment action required (ACH or delayed payment method)`);
-  console.log(`  → Amount: $${amountDue / 100}`);
-  console.log(`  → Payment Intent: ${paymentIntentId}`);
-  
-  // Find subscription
-  if (subscriptionStripeId) {
-    const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
-      stripeSubscriptionId: subscriptionStripeId,
-    });
-    
-    if (subscriptions.length > 0) {
-      console.log(`  → Linked to subscription: ${subscriptions[0]._id}`);
-    }
-  }
-  
-  console.log(`  → Payment pending, will update when payment clears`);
-}
-
-async function handleChargeRefunded(ctx: any, data: any) {
-  // Extract refund details
-  const paymentIntentId = data.payment_intent;
-  const amountRefunded = data.amount_refunded;
-  
-  console.log(`  → Charge refunded`);
-  console.log(`  → Amount refunded: $${amountRefunded / 100}`);
-  console.log(`  → Payment Intent: ${paymentIntentId}`);
 }
 
 // ========================================
@@ -549,6 +412,60 @@ export const updatePriceFromStripe = internalAction({
       amount: 0,
       isPublic: true,
     });
+  },
+});
+
+/**
+ * Helper mutation to create a new subscription
+ */
+export const createSubscription = internalMutation({
+  args: {
+    userId: v.id("users"),
+    garageId: v.id("garages"),
+    productId: v.id("products"),
+    startDate: v.string(),
+    stripeSubscriptionId: v.string(),
+    seats: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const now = new Date().toISOString();
+    await ctx.db.insert("subscriptions", {
+      userId: args.userId,
+      garageId: args.garageId,
+      productId: args.productId,
+      startDate: args.startDate,
+      endDate: null,
+      stripeSubscriptionId: args.stripeSubscriptionId,
+      seats: args.seats,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+/**
+ * Helper mutation to update subscription in database
+ */
+export const updateSubscriptionInDb = internalMutation({
+  args: {
+    subscriptionId: v.id("subscriptions"),
+    endDate: v.optional(v.string()),
+    seats: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const updates: any = {
+      updatedAt: new Date().toISOString(),
+    };
+    
+    if (args.endDate !== undefined) {
+      updates.endDate = args.endDate;
+    }
+    
+    if (args.seats !== undefined) {
+      updates.seats = args.seats;
+    }
+    
+    await ctx.db.patch(args.subscriptionId, updates);
   },
 });
 

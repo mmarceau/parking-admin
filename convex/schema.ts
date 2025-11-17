@@ -52,7 +52,6 @@ export default defineSchema({
     productId: v.id("products"),
     startDate: v.string(),
     endDate: v.union(v.string(), v.null()),
-    dueDate: v.string(),
     stripeSubscriptionId: v.string(),
     seats: v.number(),
     createdAt: v.string(),

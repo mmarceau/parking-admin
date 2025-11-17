@@ -90,6 +90,15 @@ export const createCheckoutSession = action({
           garageName: garage.name,
           productName: product.name,
         },
+        subscription_data: {
+          metadata: {
+            userId: args.userId,
+            garageId: args.garageId,
+            productId: args.productId,
+            priceId: args.priceId,
+            seats: args.quantity.toString(),
+          },
+        },
         // Enable automatic tax calculation if configured
         // automatic_tax: { enabled: true },
       });

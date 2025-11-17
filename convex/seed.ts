@@ -233,72 +233,11 @@ export const seedProductPrices = mutation({
 
 /**
  * Seed Subscriptions
- * Creates test subscriptions for users, garages, and products
- * Requires users, garages, and products to exist first
+ * 
+ * NOTE: Subscriptions are now created via Stripe webhooks when users complete checkout.
+ * This seeder has been removed to prevent conflicts with the webhook-based subscription creation.
+ * If you need test subscriptions, use the actual Stripe checkout flow.
  */
-export const seedSubscriptions = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const subscriptions = [];
-    const now = new Date().toISOString();
-
-    // Get all users, garages, and products
-    const users = await ctx.db.query("users").collect();
-    const garages = await ctx.db.query("garages").collect();
-    const products = await ctx.db.query("products").collect();
-
-    if (users.length === 0 || garages.length === 0 || products.length === 0) {
-      throw new Error("Please seed users, garages, and products first");
-    }
-
-    // Create 1-2 subscriptions per user
-    for (let user of users) {
-      const numSubscriptions = faker.number.int({ min: 0, max: 2 });
-
-      for (let i = 0; i < numSubscriptions; i++) {
-        const garage = faker.helpers.arrayElement(garages);
-        
-        // Get products that belong to this garage
-        const garageProducts = products.filter(p => p.garageId === garage._id);
-        
-        // Skip if this garage has no products
-        if (garageProducts.length === 0) continue;
-        
-        const product = faker.helpers.arrayElement(garageProducts);
-        const startDate = faker.date.past({ years: 1 });
-        
-        // 30% chance subscription has ended
-        let endDate = null;
-        if (faker.datatype.boolean(0.3)) {
-          endDate = faker.date.between({ 
-            from: startDate, 
-            to: new Date() 
-          }).toISOString();
-        }
-
-        // Due date is typically monthly from start
-        const dueDate = new Date(startDate);
-        dueDate.setMonth(dueDate.getMonth() + 1);
-
-        const subscriptionId = await ctx.db.insert("subscriptions", {
-          userId: user._id,
-          garageId: garage._id,
-          productId: product._id,
-          startDate: startDate.toISOString(),
-          endDate: endDate,
-          dueDate: dueDate.toISOString(),
-          stripeSubscriptionId: `sub_${faker.string.alphanumeric(14)}`,
-          seats: product.availableSeats || 1,
-          createdAt: now,
-          updatedAt: now,
-        });
-        subscriptions.push(subscriptionId);
-      }
-    }
-
-    return { count: subscriptions.length, ids: subscriptions };
-  },
-});
 
 /**
  * Seed User Roles
@@ -457,27 +396,6 @@ export const insertRole = mutation({
   },
 });
 
-/**
- * Internal helper mutation to insert a subscription
- * Used by seedAll action
- */
-export const insertSubscription = mutation({
-  args: {
-    userId: v.id("users"),
-    garageId: v.id("garages"),
-    productId: v.id("products"),
-    startDate: v.string(),
-    endDate: v.union(v.string(), v.null()),
-    dueDate: v.string(),
-    stripeSubscriptionId: v.string(),
-    seats: v.number(),
-    createdAt: v.string(),
-    updatedAt: v.string(),
-  },
-  handler: async (ctx, args) => {
-    return await ctx.db.insert("subscriptions", args);
-  },
-});
 
 /**
  * Internal helper mutation to insert a user role
@@ -681,50 +599,9 @@ export const seedAll = action({
     }
     console.log(`✓ Created ${results.productPrices} product prices with Stripe integration`);
 
-    // 6. Seed Subscriptions
-    console.log("Seeding subscriptions...");
-    for (let user of users) {
-      const numSubscriptions = faker.number.int({ min: 0, max: 2 });
-      
-      for (let i = 0; i < numSubscriptions; i++) {
-        const garage = faker.helpers.arrayElement(garages);
-        
-        // Get products that belong to this garage
-        const garageProducts = products.filter(p => p.garageId === garage._id);
-        
-        // Skip if this garage has no products
-        if (garageProducts.length === 0) continue;
-        
-        const product = faker.helpers.arrayElement(garageProducts);
-        const startDate = faker.date.past({ years: 1 });
-        
-        let endDate = null;
-        if (faker.datatype.boolean(0.3)) {
-          endDate = faker.date.between({ 
-            from: startDate, 
-            to: new Date() 
-          }).toISOString();
-        }
-
-        const dueDate = new Date(startDate);
-        dueDate.setMonth(dueDate.getMonth() + 1);
-
-        await ctx.runMutation(api.seed.insertSubscription, {
-          userId: user._id,
-          garageId: garage._id,
-          productId: product._id,
-          startDate: startDate.toISOString(),
-          endDate: endDate,
-          dueDate: dueDate.toISOString(),
-          stripeSubscriptionId: `sub_${faker.string.alphanumeric(14)}`,
-          seats: product.availableSeats || 1,
-          createdAt: now,
-          updatedAt: now,
-        });
-        results.subscriptions++;
-      }
-    }
-    console.log(`✓ Created ${results.subscriptions} subscriptions`);
+    // 6. Skip Subscription Seeding
+    // Note: Subscriptions are now created via Stripe webhooks
+    console.log("Skipping subscription seeding (created via Stripe webhooks)");
 
     // 7. Seed User Roles
     console.log("Seeding user roles...");

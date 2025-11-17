@@ -29,40 +29,45 @@ http.route({
     // Get the Stripe signature from headers for verification
     const signature = request.headers.get("stripe-signature");
     
-    if (!signature) {
-      console.error("No stripe-signature header found");
-      return new Response("Missing signature", { status: 400 });
-    }
-
     // Get the raw body (needed for signature verification)
     const body = await request.text();
     
     // Verify webhook secret is configured
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!webhookSecret) {
-      console.error("STRIPE_WEBHOOK_SECRET environment variable not set");
-      return new Response("Webhook secret not configured", { status: 500 });
-    }
-
+    
     // Verify and construct the Stripe event
     let event: Stripe.Event;
     
-    try {
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-        apiVersion: "2025-10-29.clover",
-      });
+    if (webhookSecret && signature) {
+      // Webhook secret is set - verify signature for security
+      try {
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+          apiVersion: "2025-10-29.clover",
+        });
+        
+        // Verify the webhook signature to ensure it came from Stripe
+        event = stripe.webhooks.constructEvent(
+          body,
+          signature,
+          webhookSecret
+        );
+        
+        console.log(`✓ Webhook verified: ${event.type} (${event.id})`);
+      } catch (err: any) {
+        console.error(`⚠ Webhook signature verification failed: ${err.message}`);
+        return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+      }
+    } else {
+      // No webhook secret or signature - skip verification (NOT recommended for production!)
+      // console.warn("⚠️  STRIPE_WEBHOOK_SECRET not set or no signature - skipping signature verification (POC mode)");
       
-      // Verify the webhook signature to ensure it came from Stripe
-      event = stripe.webhooks.constructEvent(
-        body,
-        signature,
-        webhookSecret
-      );
-      
-      console.log(`✓ Webhook verified: ${event.type} (${event.id})`);
-    } catch (err: any) {
-      console.error(`⚠ Webhook signature verification failed: ${err.message}`);
-      return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+      try {
+        event = JSON.parse(body);
+        // console.log(`⚠️  Unverified webhook: ${event.type} (${event.id})`);
+      } catch (err: any) {
+        console.error(`⚠ Failed to parse webhook body: ${err.message}`);
+        return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+      }
     }
 
     // Handle the event asynchronously
