@@ -159,8 +159,12 @@ Webhooks enable Stripe to notify your app when events occur (like payment comple
 4. Select events:
    - `checkout.session.completed`
    - `checkout.session.async_payment_succeeded`
+   - `checkout.session.async_payment_failed`
+   - `invoice.payment_failed`
+   - `payment_intent.payment_failed`
    - `product.*`
    - `price.*`
+   - `customer.subscription.*`
 5. Copy webhook signing secret
 6. Set in Convex:
    ```bash
@@ -320,8 +324,102 @@ Never mix test and live keys!
 ✅ Automatic subscription creation after payment  
 ✅ Webhook integration for bidirectional sync  
 ✅ Support for one-time and recurring payments  
+✅ Payment failure handling and subscription grace periods  
 ✅ Test mode for safe development  
 ✅ Production-ready implementation  
+
+---
+
+## 💳 Payment Failure Handling
+
+Your integration automatically handles payment failures for recurring subscriptions:
+
+### How It Works
+
+1. **Grace Period**: After a payment fails, Stripe automatically retries according to your retry schedule
+2. **Automatic Retries**: Your subscription remains active during the first 3 payment attempts
+3. **Subscription Expiration**: After 3 failed attempts, the subscription is automatically marked as expired
+
+### What Happens on Payment Failure
+
+```
+Payment fails → Stripe retries automatically
+  ├─ Attempt 1-2: Subscription stays active (grace period)
+  └─ Attempt 3+: Subscription marked as expired
+```
+
+### Webhook Events Handled
+
+Your app processes these payment failure events:
+
+- **`invoice.payment_failed`** - Recurring payment failed
+  - Tracks attempt count
+  - Expires subscription after 3 attempts
+  - Logs retry schedule
+
+- **`payment_intent.payment_failed`** - Payment processing failed
+  - Logs failure reason (card_declined, insufficient_funds, etc.)
+  - Used for analytics and debugging
+
+- **`checkout.session.async_payment_failed`** - Initial checkout payment failed
+  - Customer must retry checkout
+  - No subscription created until successful payment
+
+### Testing Payment Failures
+
+Use Stripe's test cards to simulate failures:
+
+```bash
+# Declined card
+4000 0000 0000 0002
+
+# Insufficient funds
+4000 0000 0000 9995
+
+# Expired card
+4000 0000 0000 0069
+```
+
+Then monitor the webhook events:
+```bash
+npx convex dev
+# Watch for payment failure logs
+```
+
+### Viewing Failed Payments
+
+**In Stripe Dashboard**:
+1. Go to https://dashboard.stripe.com/test/payments
+2. Filter by "Failed"
+3. Click any payment to see failure reason
+
+**In Convex Logs**:
+```bash
+npx convex dev
+# Look for "⚠ Invoice payment failed" messages
+```
+
+### Subscription Expiration Logic
+
+```typescript
+// After 3 failed payment attempts:
+if (attemptCount >= 3) {
+  // Subscription is expired
+  subscription.endDate = now()
+} else {
+  // Still in grace period
+  // Stripe will retry automatically
+}
+```
+
+### Custom Retry Settings
+
+To customize Stripe's retry behavior:
+
+1. Go to https://dashboard.stripe.com/settings/billing/automatic
+2. Configure your retry schedule
+3. Set maximum retry attempts
+4. Configure dunning emails (payment reminders)
 
 ---
 

@@ -5,9 +5,8 @@
  * back to the Convex database.
  */
 
-import { internalAction } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { query } from "./_generated/server";
 import { v } from "convex/values";
 
 /**
@@ -84,13 +83,25 @@ export const handleStripeWebhook = internalAction({
           await handleSubscriptionDeleted(ctx, data);
           break;
         
-        // Payment events (for logging/monitoring)
+        // Payment events
         case "payment_intent.succeeded":
           console.log(`  → Payment succeeded: ${data.id} - $${data.amount / 100}`);
           break;
           
         case "payment_intent.payment_failed":
-          console.log(`  ⚠ Payment failed: ${data.id}`);
+          console.log(`  ⚠ Payment intent failed: ${data.id}`);
+          await handlePaymentIntentFailed(ctx, data);
+          break;
+        
+        // Invoice payment events
+        case "invoice.payment_failed":
+          console.log(`  ⚠ Invoice payment failed: ${data.id}`);
+          await handleInvoicePaymentFailed(ctx, data);
+          break;
+        
+        case "checkout.session.async_payment_failed":
+          console.log(`  ⚠ Checkout async payment failed: ${data.id}`);
+          await handleCheckoutPaymentFailed(ctx, data);
           break;
         
         default:
@@ -269,6 +280,93 @@ async function handleSubscriptionDeleted(ctx: any, data: any) {
 }
 
 // ========================================
+// Payment Failure Handlers
+// ========================================
+
+async function handleInvoicePaymentFailed(ctx: any, data: any) {
+  const { api } = await import("./_generated/api");
+  
+  // Extract invoice details
+  const subscriptionId = data.subscription;
+  const attemptCount = data.attempt_count;
+  const nextPaymentAttempt = data.next_payment_attempt;
+  const amountDue = data.amount_due;
+  
+  console.log(`  → Payment attempt ${attemptCount} failed`);
+  console.log(`  → Subscription: ${subscriptionId}`);
+  console.log(`  → Amount: $${amountDue / 100}`);
+  
+  if (nextPaymentAttempt) {
+    const nextAttempt = new Date(nextPaymentAttempt * 1000);
+    console.log(`  → Next retry: ${nextAttempt.toISOString()}`);
+  }
+  
+  // Find subscription in database
+  const subscriptions = await ctx.runQuery(api.webhooks.findSubscriptionByStripeId, {
+    stripeSubscriptionId: subscriptionId,
+  });
+  
+  if (subscriptions.length === 0) {
+    console.log(`  ⚠ Subscription ${subscriptionId} not found in database`);
+    return;
+  }
+  
+  const subscription = subscriptions[0];
+  
+  // Update subscription based on attempt count
+  if (attemptCount >= 3) {
+    // After 3 failed attempts, mark as expired
+    console.log(`  → Marking subscription as expired after ${attemptCount} failed attempts`);
+    await ctx.runAction(internal.webhooks.expireSubscription, {
+      subscriptionId: subscription._id,
+      reason: `Payment failed after ${attemptCount} attempts`,
+    });
+  } else {
+    console.log(`  → Subscription in grace period (attempt ${attemptCount}/3)`);
+    // Subscription remains active during retry period
+    // Stripe will automatically retry according to retry schedule
+  }
+}
+
+async function handleCheckoutPaymentFailed(ctx: any, data: any) {
+  console.log(`  → Checkout session payment failed`);
+  console.log(`  → Session: ${data.id}`);
+  
+  // Extract metadata from checkout session
+  const metadata = data.metadata;
+  
+  if (metadata) {
+    console.log(`  → User: ${metadata.userId || 'unknown'}`);
+    console.log(`  → Product: ${metadata.productName || 'unknown'}`);
+    console.log(`  → Customer can retry checkout from your app`);
+  }
+  
+  // Customer will need to initiate a new checkout session to retry
+  // No database updates needed since subscription was never created
+}
+
+async function handlePaymentIntentFailed(ctx: any, data: any) {
+  const failureCode = data.last_payment_error?.code;
+  const failureMessage = data.last_payment_error?.message;
+  const amount = data.amount;
+  
+  console.log(`  → Payment intent failed`);
+  console.log(`  → Amount: $${amount / 100}`);
+  console.log(`  → Failure code: ${failureCode || 'unknown'}`);
+  console.log(`  → Message: ${failureMessage || 'No details'}`);
+  
+  // Common failure codes:
+  // - card_declined
+  // - insufficient_funds
+  // - expired_card
+  // - incorrect_cvc
+  // - processing_error
+  
+  // Log for analytics/debugging
+  // Customer will receive error during checkout flow
+}
+
+// ========================================
 // Database Query Helpers
 // ========================================
 
@@ -295,6 +393,29 @@ export const findPriceByStripeId = query({
       .query("productPrices")
       .filter((q) => q.eq(q.field("stripePriceId"), args.stripePriceId))
       .collect();
+  },
+});
+
+/**
+ * Find a subscription by its Stripe subscription ID
+ */
+export const findSubscriptionByStripeId = query({
+  args: { stripeSubscriptionId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("subscriptions")
+      .filter((q) => q.eq(q.field("stripeSubscriptionId"), args.stripeSubscriptionId))
+      .collect();
+  },
+});
+
+/**
+ * Get a subscription by ID (internal only)
+ */
+export const getSubscription = internalQuery({
+  args: { subscriptionId: v.id("subscriptions") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.subscriptionId);
   },
 });
 
@@ -345,6 +466,54 @@ export const updatePriceFromStripe = internalAction({
       amount: 0,
       isPublic: true,
     });
+  },
+});
+
+/**
+ * Internal mutation to update subscription status to expired
+ */
+export const updateSubscriptionStatus = internalMutation({
+  args: {
+    subscriptionId: v.id("subscriptions"),
+    endDate: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.subscriptionId, {
+      endDate: args.endDate,
+      updatedAt: new Date().toISOString(),
+    });
+  },
+});
+
+/**
+ * Expire a subscription due to payment failure
+ */
+export const expireSubscription = internalAction({
+  args: {
+    subscriptionId: v.id("subscriptions"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const subscription = await ctx.runQuery(internal.webhooks.getSubscription, {
+      subscriptionId: args.subscriptionId,
+    });
+    
+    if (!subscription) {
+      console.log(`  ⚠ Subscription ${args.subscriptionId} not found`);
+      return;
+    }
+    
+    // Only expire if not already expired
+    if (subscription.endDate === null) {
+      await ctx.runMutation(internal.webhooks.updateSubscriptionStatus, {
+        subscriptionId: args.subscriptionId,
+        endDate: new Date().toISOString(),
+      });
+      
+      console.log(`  ✓ Subscription expired: ${args.reason}`);
+    } else {
+      console.log(`  ℹ Subscription already expired`);
+    }
   },
 });
 
