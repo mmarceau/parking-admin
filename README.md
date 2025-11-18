@@ -4,7 +4,7 @@ A parking subscription management system built with Convex and Stripe. This POC 
 
 ## Prerequisites
 
-- **Node.js v22** - Use NVM to manage Node versions:
+**Node.js v22** - Use NVM to manage Node versions:
   ```bash
   nvm install 22
   nvm use 22
@@ -25,9 +25,7 @@ This will prompt you to create a Convex account and project if you haven't alrea
 
 ### 2. Setup Environment Variables
 
-*** Convex create a .env.local file your you automatically ***
-If Convex does not create an .env.local file, please manually use the env.local-example and update it accordingly.
-
+Convex will create a .env.local file your you automatically. You can also manually create one using env.local-example as a reference.
 
 ### 3. Setup Stripe Sandbox
 
@@ -64,7 +62,6 @@ stripe login
 ### 4. Seed Database
 
 *** Note: You must have stripe cli working before seeding the database ***
-Populate your database with test data: 
 
 ```bash
 npx convex run seed:seedAll
@@ -106,8 +103,10 @@ Your webhook url is slightly different:
 https://shocking-yak-278.convex.site/webhooks/stripe
 
 *** Notice that the TLD is 'site' and not 'cloud' ***
+
 You can also view this proper URL going into the Convex dashboard and clicking on:
-Settings --> URL & Deploy Key --> HTTP Actions URL
+
+`Settings --> URL & Deploy Key --> HTTP Actions URL`
 
 After you have your webhooks endpoint, Go into the Stripe dashboard and then:
 1. Click on **Developers** (At the bottom)
